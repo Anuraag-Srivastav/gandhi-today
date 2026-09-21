@@ -2,9 +2,15 @@ import Groq from "groq-sdk";
 import { getSystemPrompt } from "@/lib/prompt";
 import type { ChatMessage } from "@/lib/types";
 
-const MODEL = process.env.GROQ_MODEL ?? "openai/gpt-oss-120b";
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const MAX_MESSAGES = 24;
 const MAX_CONTENT_LENGTH = 8000;
+
+function getGroqModel() {
+  // Next.js inlines missing env vars as "" at build time, so ?? would keep an empty model.
+  const configured = process.env.GROQ_MODEL?.trim();
+  return configured || DEFAULT_GROQ_MODEL;
+}
 
 function isChatMessage(value: unknown): value is ChatMessage {
   if (!value || typeof value !== "object") return false;
@@ -56,7 +62,7 @@ export async function POST(request: Request) {
 
   try {
     const stream = await groq.chat.completions.create({
-      model: MODEL,
+      model: getGroqModel(),
       temperature: 0.4,
       max_tokens: 1200,
       reasoning_effort: "low",
