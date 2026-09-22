@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       async start(controller) {
         try {
           for await (const chunk of stream) {
-            const text = chunk.choices[0]?.delta?.content;
+            const text = chunk.choices[0]?.delta?.content?.replace(/\*/g, " ");
             if (text) controller.enqueue(encoder.encode(text));
           }
         } catch (error) {

@@ -10,23 +10,21 @@ import {
 } from "react";
 import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
 
+function sanitizeOutput(text: string) {
+  return text.replace(/\*/g, " ");
+}
+
 function renderContent(text: string) {
-  const paragraphs = text.split(/\n{2,}/);
+  const paragraphs = sanitizeOutput(text).split(/\n{2,}/);
 
   return paragraphs.map((paragraph, index) => (
     <p key={index}>
-      {paragraph.split(/(\*\*[^*]+\*\*)/g).map((part, partIndex) => {
-        if (part.startsWith("**") && part.endsWith("**")) {
-          return <strong key={partIndex}>{part.slice(2, -2)}</strong>;
-        }
-
-        return part.split("\n").map((line, lineIndex, lines) => (
-          <span key={`${partIndex}-${lineIndex}`}>
-            {line}
-            {lineIndex < lines.length - 1 ? <br /> : null}
-          </span>
-        ));
-      })}
+      {paragraph.split("\n").map((line, lineIndex, lines) => (
+        <span key={lineIndex}>
+          {line}
+          {lineIndex < lines.length - 1 ? <br /> : null}
+        </span>
+      ))}
     </p>
   ));
 }
@@ -124,7 +122,7 @@ export function Chat() {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        assistant += decoder.decode(value, { stream: true });
+        assistant += sanitizeOutput(decoder.decode(value, { stream: true }));
         setMessages([...nextMessages, { role: "assistant", content: assistant }]);
       }
     } catch (caught) {
