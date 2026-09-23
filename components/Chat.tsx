@@ -92,7 +92,12 @@ export function Chat() {
 
   async function send(content: string, verifySources = false) {
     const trimmed = content.trim();
-    if (!trimmed || isLoading) return;
+    if (isLoading) return;
+    if (!trimmed) {
+      setError("Type your question in the box above, then select Ask.");
+      textareaRef.current?.focus();
+      return;
+    }
 
     const nextMessages: ChatMessage[] = [
       ...messages,
@@ -219,12 +224,14 @@ export function Chat() {
                 {error}
               </p>
             ) : null}
-            <div className="flex items-end gap-2 rounded-2xl border border-earth/15 bg-khadi/60 px-3 py-2 focus-within:border-saffron/50">
+            <label htmlFor="gandhi-question" className="mb-2 block text-sm font-medium text-ink">Your question</label>
+            <div className="flex items-end gap-2 rounded-2xl border border-saffron/50 bg-paper px-3 py-2 focus-within:ring-2 focus-within:ring-saffron/40">
               <textarea
+                id="gandhi-question"
                 aria-label="Your question about Gandhi"
                 ref={textareaRef}
                 value={input}
-                onChange={(event) => setInput(event.target.value)}
+                onChange={(event) => { setInput(event.target.value); setError(null); }}
                 onKeyDown={onKeyDown}
                 rows={1}
                 placeholder="Ask what Gandhi might say about a present-day issue…"
@@ -246,8 +253,7 @@ export function Chat() {
               ) : (
                 <button
                   type="submit"
-                  disabled={!input.trim()}
-                  className="mb-1 rounded-full bg-saffron px-4 py-2 text-sm text-paper transition hover:bg-saffron-deep disabled:cursor-not-allowed disabled:opacity-40"
+                  className="mb-1 rounded-full bg-saffron px-4 py-2 text-sm text-paper transition hover:bg-saffron-deep"
                 >
                   Ask
                 </button>

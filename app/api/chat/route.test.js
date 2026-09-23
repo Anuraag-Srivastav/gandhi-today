@@ -44,6 +44,9 @@ test("probe executes search and retains actual evidence for later turns", async 
   const events = await ask("source please");
   expect(calls).toHaveLength(2);
   expect(calls[0].tools).toEqual([{ type: "browser_search" }]);
+  expect(calls[0].reasoning_effort).toBe("medium");
+  expect(calls[1].reasoning_effort).toBe("medium");
+  expect(calls[1].temperature).toBe(0);
   const finalMessages = calls[1].messages;
   const reference = JSON.parse(finalMessages.at(-1).content).Reference;
   expect(reference).toContain("Source passage.");
@@ -54,6 +57,16 @@ test("probe executes search and retains actual evidence for later turns", async 
   await ask("Explain the idea simply", metadata.evidenceToken);
   expect(calls).toHaveLength(1);
   expect(JSON.parse((calls[0].messages).at(-1).content).Reference).toContain("Source passage.");
+});
+
+test("ordinary definition after a probe stays answerable without another search", async () => {
+  const events = await ask("source please");
+  const token = events.findLast(e => e.type === "metadata").evidenceToken;
+  calls.length = 0;
+  await ask("What is AI?", token);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].messages[0].content).toContain("Answer ordinary definitions from general knowledge");
+  expect(calls[0].messages[0].content).toContain("Its presence does not make ordinary questions source-only tasks");
 });
 test("missing tool records are not described as successful search", async () => {
   toolResults = false;

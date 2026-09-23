@@ -9,7 +9,7 @@ import { resolveCitations } from "@/lib/citations";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-/** Source probes retrieve tool output before the v18 answer is streamed. */
+/** Source probes retrieve tool output before the answer is streamed. */
 export async function POST(request: Request) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return Response.json({ error: "GROQ_API_KEY is not configured." }, { status: 500 });
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
         emit({ type: "status", text: probe ? "Checking sources…" : "Preparing an interpretation…" });
         if (probe) {
           const research = await groq.chat.completions.create({
-            model, temperature: 0, max_tokens: 3500, reasoning_effort: "low",
+            model, temperature: 0, max_tokens: 4500, reasoning_effort: "medium",
             include_reasoning: false, stream: false,
             tools: [{ type: "browser_search" }], tool_choice: "required",
             messages: [
@@ -88,18 +88,18 @@ export async function POST(request: Request) {
           }
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: 0.4, reasoningEffort: "low", messages: messages.length, searchStatus, toolsExecuted };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort: probe ? "medium" as const : "low" as const, messages: messages.length, searchStatus, toolsExecuted };
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken });
         emit({ type: "status", text: "Preparing an answer…" });
         const stream = await groq.chat.completions.create({
-          model, temperature: 0.4, max_tokens: 1200, reasoning_effort: "low",
+          model, temperature: metadata.temperature, max_tokens: probe ? 3000 : 1200, reasoning_effort: metadata.reasoningEffort,
           include_reasoning: false, stream: true,
           messages: [
-            { role: "system", content: rules + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Cite sourceUrl from the supporting excerpt as a clickable Markdown link. Never output record paths or tool citation markers. If an excerpt has no associated sourceUrl, give only its evidenced bibliographic details and acknowledge that its link is unavailable. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
+            { role: "system", content: rules + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Retained evidence may concern an older topic; use only passages relevant to the current question. Its presence does not make ordinary questions source-only tasks. Cite a supporting excerpt's sourceUrl using [Source](URL), without extra brackets or citation symbols. If no sourceUrl exists, use evidenced bibliographic details once, not repeated link-unavailable placeholders. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
             ...messages.slice(0, -1),
             { role: "user", content: probe ? JSON.stringify({ Question: question, Reference: reference,
-              verificationTarget, task: "Check this target answer against the evidence. Cite supporting source URLs and correct unsupported claims. Do not substitute checking a different conversation topic." })
+              verificationTarget, task: "Audit this target answer claim by claim against the supplied passages. First explicitly correct or withdraw unsupported attributions and conditions. Keep only claims whose full meaning is supported; do not append new historical claims to preserve the old conclusion. A topical match is not proof. Quote only exact passage text, distinguishing Gandhi's words from a correspondent's. Cite supporting source URLs. Do not substitute a different conversation topic." })
               : formatQuestion(question, reference) },
           ],
         }, { signal: abort.signal });

@@ -17,21 +17,27 @@ export function selectSourceEvidence(records: unknown[], query: string) {
         } catch { /* Plain-text browser output is retained verbatim below. */ }
       }
       // Only explicit document headers establish a URL for unstructured output.
-      const headers = [...value.matchAll(/^(?:([^\n]+) \((https?:\/\/[^\s)]+)\)|URL:\s*(https?:\/\/\S+))\s*$/gm)];
+      const headers = [...value.matchAll(/^(?:([^\n]+) \((https?:\/\/[^\s)]+)\)|URL:\s*(https?:\/\/\S+)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\))\s*$/gm)];
       if (/(?:url|title|link|date|type)$/i.test(path)) {
         if (metadata.length < 60) metadata.push({ path, value: value.slice(0, 1000) });
         return;
       }
-      for (let offset = 0; offset < value.length; offset += 1400) {
-        const text = value.slice(Math.max(0, offset - 200), offset + 1600);
-        const lower = text.toLowerCase();
-        const begin = Math.max(0, offset - 200);
-        const header = headers.findLast((item) => item.index! <= begin);
-        const crossesHeader = headers.some((item) => item.index! > begin && item.index! < offset + 1600);
-        const headerUrl = !crossesHeader && header ? header[2] || header[3] : undefined;
-        candidates.push({ path: path + ":" + Math.max(0, offset - 200), text,
-          score: terms.filter((term) => lower.includes(term)).length,
-          partial: value.length > text.length, sourceUrl: sourceUrl || headerUrl, sourceTitle: sourceTitle || header?.[1] });
+      // Split at explicit source boundaries before windowing; a short first
+      // passage must not lose its URL or inherit the next document's URL.
+      const boundaries = [...new Set([0, ...headers.map(h => h.index!), value.length])];
+      for (let block = 0; block < boundaries.length - 1; block++) {
+        const start = boundaries[block];
+        const end = boundaries[block + 1];
+        const header = headers.find(h => h.index === start);
+        for (let offset = start; offset < end; offset += 1400) {
+          const begin = Math.max(start, offset - 200);
+          const text = value.slice(begin, Math.min(end, offset + 1600));
+          const lower = text.toLowerCase();
+          const headerUrl = header ? header[2] || header[3] || header[5] : undefined;
+          candidates.push({ path: path + ":" + begin, text,
+            score: terms.filter((term) => lower.includes(term)).length,
+            partial: end - start > text.length, sourceUrl: headerUrl || sourceUrl, sourceTitle: header?.[1] || header?.[4] || sourceTitle });
+        }
       }
     } else if (Array.isArray(value)) {
       value.forEach((item, index) => visit(item, path + "[" + index + "]", depth + 1, sourceUrl, sourceTitle));
@@ -43,7 +49,7 @@ export function selectSourceEvidence(records: unknown[], query: string) {
     }
   }
   records.forEach((record, index) => visit(record, "record[" + index + "]"));
-  candidates.sort((a, b) => b.score - a.score);
+  candidates.sort((a, b) => b.score - a.score || Number(Boolean(b.sourceUrl)) - Number(Boolean(a.sourceUrl)));
   const excerpts: typeof candidates = [];
   const bundle = { retrievedAt: new Date().toISOString(), partial: true,
     note: "Selected verbatim excerpts. Missing text is not evidence of absence. Paths associate metadata with its original record. Search snippets are leads, not inspected full documents.",
