@@ -10,7 +10,7 @@ import {
 } from "react";
 import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
 import Link from "next/link";
-import { plainAnswerText } from "@/lib/answer-display";
+import { answerWithSources, plainAnswerText } from "@/lib/answer-display";
 
 function renderLinks(text: string) {
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+)/g;
@@ -40,6 +40,20 @@ function renderContent(text: string) {
       ))}
     </p>
   ));
+}
+
+/** Keep citations below the answer rather than interrupting its sentences. */
+function AnswerContent({ text }: { text: string }) {
+  const { body, sources } = answerWithSources(text);
+  return <>
+    {renderContent(body)}
+    {sources.length > 0 && <nav aria-label="Sources for this answer" className="font-ui mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-earth/15 pt-2 text-xs leading-5 text-ink-soft">
+      {sources.map((source, index) => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 max-w-full items-center gap-1.5 underline underline-offset-4 hover:text-saffron-deep">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="shrink-0"><path d="M14 3h7v7M21 3 10 14M10 3H4v17h17v-6" /></svg>
+        <span>Source{sources.length > 1 ? ` ${index + 1}` : ""} · {source.label}</span>
+      </a>)}
+    </nav>}
+  </>;
 }
 
 function Charkha({ className = "", spinning = false }: { className?: string; spinning?: boolean }) {
@@ -404,7 +418,7 @@ export function Chat() {
                               isUser ? "text-paper" : "text-ink"
                             }`}
                           >
-                            {renderContent(message.content)}
+                            {isUser ? renderContent(message.content) : <AnswerContent text={message.content} />}
                           </div>
                         )}
                       </div>

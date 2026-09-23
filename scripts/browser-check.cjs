@@ -22,7 +22,7 @@ const assert = require('node:assert/strict');
         const events = [
           { type: 'metadata', promptVersion: 'v22', promptHash: 'test', model: 'mock', searchStatus: failure ? 'answer-failed' : 'results-returned', toolsExecuted: 1, requestId: 'browser-test', evidenceToken: 'signed-test-token', retryToken: 'signed-retry-token' },
           ...(failure ? [{ type: 'error', text: 'Source service unavailable. Please retry.' }] : [
-            { type: 'text', text: 'A cautious interpretation of *ahimsa* and **swaraj**. [Source](https://example.org/gandhi). See https://example.org/reading.' },
+            { type: 'text', text: 'A cautious interpretation of *ahimsa* [Source](https://example.org/gandhi) and **swaraj**. Further background [Reading](https://example.org/reading).' },
             ...(interrupted ? [] : [{ type: 'done' }]),
           ]),
         ];
@@ -48,8 +48,11 @@ const assert = require('node:assert/strict');
       await input.press('Enter');
       await page.getByRole('button', { name: 'Verify sources' }).waitFor();
       assert.equal(requests[0].reasoningEffort, undefined, 'server controls reasoning defaults');
-      assert.equal(await page.getByRole('link', { name: 'Source', exact: true }).getAttribute('href'), 'https://example.org/gandhi');
-      assert((await page.locator('article').last().innerText()).endsWith('reading.'), 'preserve punctuation');
+      assert.equal(await page.getByRole('link', { name: 'Source 1 · example.org', exact: true }).getAttribute('href'), 'https://example.org/gandhi');
+      const answer = page.locator('article').last();
+      assert.equal(await answer.locator('.prose-gandhi > p a').count(), 0, 'sources never interrupt prose');
+      assert((await answer.locator('.prose-gandhi > p').first().innerText()).endsWith('background.'), 'preserve punctuation');
+      assert.equal(await answer.getByRole('navigation', { name: 'Sources for this answer' }).getByRole('link').count(), 2);
       assert(!(await page.locator('article').last().innerText()).includes('*'), 'emphasis markers are not displayed');
       await page.getByRole('button', { name: 'Verify sources' }).click();
       await page.getByRole('button', { name: 'Verify sources' }).waitFor();
