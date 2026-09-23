@@ -8,6 +8,7 @@ import { resolveCitations } from "@/lib/citations";
 import { AnswerLimitError, answerSize, enforceAnswerLimits } from "@/lib/answer-limits";
 import { providerFailure } from "@/lib/provider-failure";
 import { sourceRequest } from "@/lib/source-request";
+import { answerMode, turnInstruction } from "@/lib/answer-mode";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -35,6 +36,7 @@ export async function POST(request: Request) {
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
   const question = messages.at(-1)!.content;
   const probe = body.verifySources === true || isSourceProbe(question);
+  const mode = answerMode(question, probe);
   const retryIdentity = createHash("sha256").update(JSON.stringify({ messages, probe })).digest("hex");
   const referenceHash = createHash("sha256").update(reference).digest("hex");
   let reuseEvidence = false;
@@ -83,7 +85,7 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v22-verification2" });
+        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v23-regression1" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
@@ -110,7 +112,7 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = probe && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, messages: messages.length, searchStatus, toolsExecuted, experiment: "v22-verification2" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v23-regression1" };
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken });
         emit({ type: "status", text: "Preparing an answer…" });
@@ -118,6 +120,7 @@ export async function POST(request: Request) {
         const answerMessages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
             { role: "system", content: rules + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Retained evidence may concern an older topic; use only passages relevant to the current question. Its presence does not make ordinary questions source-only tasks. Cite a supporting excerpt's sourceUrl using [Source](URL), without extra brackets or citation symbols. If no sourceUrl exists, use evidenced bibliographic details once, not repeated link-unavailable placeholders. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
             ...messages.slice(0, -1),
+            { role: "system", content: turnInstruction(mode) },
             { role: "user", content: probe ? JSON.stringify({ Question: question, Reference: reference,
               verificationTarget, task: "Check all target claims, but deliver a concise correction, not a claim-by-claim audit report. Aim for 80–110 words in one or two paragraphs, never over 140 words including citations. Group related unsupported claims into one explicit withdrawal. Then give the central supported correction with its source and distinguish any remaining inference. Omit audit commentary and repeated claims; preserve essential qualifications. Do not add historical claims to rescue the old conclusion. Cite only passages supporting the full claim. Do not substitute another topic." })
               : formatQuestion(question, reference) },

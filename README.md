@@ -39,6 +39,12 @@ Groq documentation: https://console.groq.com/docs/tool-use/built-in-tools/browse
 
 ## Checks before evaluation
 
+### Repeatable live regression suite
+
+`bun scripts/evaluate.ts https://www.gandhisays.com` runs the ten core evaluation sequences plus two diagnostic sequences, sequentially. Optional third argument selects comma-separated sequence numbers. Output is JSONL with questions, answers, version/hash, timing, failures and mechanical format checks; signed context tokens are omitted. A failed sequence stops rather than asking follow-ups against missing answers. This invokes the live provider and uses its quota. It does not automatically award a historical accuracy score. Evaluation inputs never enter production prompt construction.
+
+V23 selects an ordinary, reading, reassessment or verification policy for each turn. The policy is supplied after conversation history to prevent previous audits from constraining later ordinary questions. Retained evidence remains available; irrelevant evidence is not a refusal condition. Corrections distinguish unsupported attribution from an assertion that no record exists. Unit tests establish request construction, not model compliance; live transcripts remain required.
+
 Runtime `v22-verification2` targets concise verification corrections within the unchanged 140-word/three-paragraph gate. Failed refinement reports the exact size violation. The Retry button can reuse retrieved evidence using a signed, expiring receipt bound to the full request and evidence hash; changed questions cannot reuse that permission. `reused-evidence` means no new search occurred. Raw rejected drafts are neither displayed nor logged.
 
 Source excerpts retain document URLs when supplied as structured metadata or explicit document headers. Internal excerpt markers are resolved to their own source links before display; missing associations display a source-link limitation, never an unrelated URL. All answers are buffered and checked for length before display, with progress updates while waiting. Home order is: Begin with an inquiry, question-entry box, suggested questions; conversation input remains at the bottom.

@@ -118,6 +118,30 @@ test("background reading does not depend on search availability", async () => {
   expect(events.at(-1).type).toBe("done");
 });
 
+test("a new historical topic after verification has an ordinary turn policy with retained evidence", async () => {
+  const first = await ask("Please verify the source");
+  const token = first.find(e => e.evidenceToken)?.evidenceToken;
+  calls.length = 0;
+  const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    messages: [{ role: "user", content: "Explain a technology" }, { role: "assistant", content: "A prior source audit limited to technology." }, { role: "user", content: "When was a different organisation founded?" }], evidenceToken: token,
+  }) }));
+  const output = await response.text();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].tools).toBeUndefined();
+  const policy = calls[0].messages.at(-2);
+  expect(policy.role).toBe("system");
+  expect(policy.content).toContain("not a continuation of a source audit");
+  expect(JSON.parse(calls[0].messages.at(-1).content).Reference).toContain("Source passage");
+  expect(output).toContain('"mode":"ordinary"');
+});
+
+test("inference challenge receives reassessment policy without forced search", async () => {
+  const events = await ask("Which part is inference?");
+  expect(calls).toHaveLength(1);
+  expect(calls[0].messages.at(-2).content).toContain("Withdraw unsupported claims");
+  expect(events.findLast(e => e.type === "metadata").mode).toBe("reassessment");
+});
+
 test("explicit online reading still searches with a focused evidence-only request", async () => {
   await ask("Search online for further reading");
   expect(calls[0].tools).toBeDefined();
