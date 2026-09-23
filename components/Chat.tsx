@@ -65,7 +65,7 @@ export function Chat() {
           if (typeof event.evidenceToken === "string") evidenceToken = event.evidenceToken;
           if (typeof event.retryToken === "string") retryToken = event.retryToken;
         }
-        if (event.type === "status") setStatus(pending.targetId ? "Checking relevant source passages…" : "Preparing your answer…");
+        if (event.type === "status") setStatus(targetId ? "Checking relevant source passages…" : "Preparing your answer…");
         if (event.type === "result") result = event.result;
         if (event.type === "done") completed = true;
         if (event.type === "error") throw new Error(event.text);
@@ -93,7 +93,7 @@ export function Chat() {
         const updated = [...item.messages]; updated[target.messages.length - 1] = entry.messages.at(-1)!;
         return { ...item, messages: updated };
       }) : [...previous, entry]);
-      setActiveId(id); if (!pending.targetId) setInput("");
+      setActiveId(id); if (!pending.verifySources) setInput("");
       setStatus(targetId ? "Source check completed; the result has been updated." : "Your answer is ready.");
       if (!targetId) requestAnimationFrame(() => { resultRef.current?.focus(); resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }); });
     } catch (cause) {

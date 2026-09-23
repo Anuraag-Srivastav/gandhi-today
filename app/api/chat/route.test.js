@@ -185,6 +185,21 @@ test("an ambiguous source target requests clarification without searching", asyn
   expect(searches()).toHaveLength(0);
   expect(answers()[0].messages[0].content).toContain("Ask briefly");
 });
+test("router cannot target a user message or invent an earlier answer", async () => {
+  planKind = "verification"; planTarget = 0;
+  const events = await ask("Verify an earlier answer");
+  expect(events.at(-1).type).toBe("error");
+  expect(searches()).toHaveLength(0); expect(answers()).toHaveLength(0);
+});
+test("a definition after source retrieval receives no unrelated old evidence", async () => {
+  planKind = "historical";
+  const initialEvents = await ask("An earlier historical topic");
+  const token = initialEvents.find(e => e.evidenceToken).evidenceToken;
+  calls.length = 0; planKind = "definition";
+  await ask("Define a different modern subject", { evidenceToken: token });
+  expect(searches()).toHaveLength(0);
+  expect(JSON.parse(answers()[0].messages.at(-1).content).Evidence).toEqual([]);
+});
 test("reassessment selects older context without replacing its result", async () => {
   planKind = "reassessment"; planTarget = 1;
   const response = await request({messages:[{role:"user",content:"First topic"},{role:"assistant",content:"First answer"},{role:"user",content:"Why did you assume that?"}]});
