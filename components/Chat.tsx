@@ -380,19 +380,22 @@ export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
                   </p>
                 </div>
                 <div>
-                  <p className="font-ui mb-3 text-[11px] tracking-[0.22em] text-earth uppercase">
+                  <p className="font-ui mb-3 text-sm text-ink">
                     Begin with an inquiry
                   </p>
                   {composer}
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <p className="font-ui mt-4 mb-2 text-xs text-ink-soft">Start with a question</p>
+                  <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
                     {SUGGESTED_INQUIRIES.map((inquiry) => (
                       <button
                         key={inquiry}
                         type="button"
                         onClick={() => void send(inquiry)}
-                        className="rounded-2xl border border-earth/15 bg-khadi/50 px-4 py-3 text-left text-sm leading-snug text-ink transition hover:border-saffron/40 hover:bg-paper"
+                        className="font-ui group flex min-h-11 items-center gap-2 rounded-lg bg-transparent px-2 py-2 text-left text-xs leading-5 text-ink-soft transition hover:bg-khadi/40 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-saffron"
                       >
-                        {inquiry}
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0"><path d="M20 11.5a8 8 0 0 1-8 8H5l-3 2v-10a9 9 0 0 1 18 0Z" /><path d="M9.5 9a2.5 2.5 0 0 1 5 .5c0 1.5-2.5 1.5-2.5 3M12 15.5v.5" /></svg>
+                        <span className="flex-1">{inquiry}</span>
+                        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 opacity-50 group-hover:opacity-100"><path d="m9 5 7 7-7 7" /></svg>
                       </button>
                     ))}
                   </div>
