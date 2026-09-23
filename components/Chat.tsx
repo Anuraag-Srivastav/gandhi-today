@@ -334,7 +334,9 @@ export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
               What would Gandhi say today?
             </h1>
             <p className="mt-1.5 max-w-md text-sm leading-relaxed text-ink-soft">
-              Ask what Gandhi actually said, or how his ideas might apply to your question. Historical answers link to sources. Modern applications are marked as interpretation.
+              Ask how Gandhi’s views apply to the situation you face.
+              <br />
+              Historical sources. Interpretation for today.
             </p>
           </div>
         </div>
