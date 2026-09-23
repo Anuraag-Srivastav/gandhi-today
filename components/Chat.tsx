@@ -101,6 +101,7 @@ export function Chat() {
     setMessages(nextMessages);
     setInput("");
     setError(null);
+    setDiagnostic("New request starting…");
     setIsLoading(true);
     setProgress(verifySources ? "Checking sources…" : "Preparing an answer…");
 
@@ -140,7 +141,7 @@ export function Chat() {
         const event = JSON.parse(line);
         if (event.type === "status") setProgress(event.text);
         if (event.type === "metadata") {
-          evidenceRef.current = event.evidenceToken;
+          if (typeof event.evidenceToken === "string") evidenceRef.current = event.evidenceToken;
           setDiagnostic([event.promptVersion, event.promptHash, event.model, "search: " + event.searchStatus, "tools: " + event.toolsExecuted, "request: " + event.requestId].join(" · "));
         }
         if (event.type === "error") throw new Error(event.text);

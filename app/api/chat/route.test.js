@@ -2,8 +2,10 @@ import { afterEach, expect, mock, test } from "bun:test";
 
 const calls = [];
 let toolResults = true;
+let searchFails = false;
 const create = mock(async (params) => {
   calls.push(params);
+  if (!params.stream && searchFails) throw new Error("Provider unavailable");
   if (!params.stream) return {
     choices: [{ message: { content: "MODEL SUMMARY MUST NOT BECOME EVIDENCE",
       executed_tools: toolResults ? [{ type: "browser_search", arguments: "{}", index: 0,
@@ -18,6 +20,7 @@ const originalModel = process.env.GROQ_MODEL;
 afterEach(() => {
   calls.length = 0;
   toolResults = true;
+  searchFails = false;
   if (originalKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = originalKey;
   if (originalModel === undefined) delete process.env.GROQ_MODEL; else process.env.GROQ_MODEL = originalModel;
 });
@@ -34,7 +37,7 @@ test("ordinary answers have no tools and receive populated inputs", async () => 
   expect(calls[0].tools).toBeUndefined();
   const messages = calls[0].messages;
   expect(JSON.parse(messages.at(-1).content).Reference).toBe("");
-  expect(events.find((e) => e.type === "metadata").searchStatus).toBe("not-requested");
+  expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("not-requested");
   expect(events.at(-1).type).toBe("done");
 });
 test("probe executes search and retains actual evidence for later turns", async () => {
@@ -45,7 +48,7 @@ test("probe executes search and retains actual evidence for later turns", async 
   const reference = JSON.parse(finalMessages.at(-1).content).Reference;
   expect(reference).toContain("Source passage.");
   expect(reference).not.toContain("MODEL SUMMARY");
-  const metadata = events.find((e) => e.type === "metadata");
+  const metadata = events.findLast((e) => e.type === "metadata");
   expect(metadata.toolsExecuted).toBe(1);
   calls.length = 0;
   await ask("Explain the idea simply", metadata.evidenceToken);
@@ -55,7 +58,7 @@ test("probe executes search and retains actual evidence for later turns", async 
 test("missing tool records are not described as successful search", async () => {
   toolResults = false;
   const events = await ask("citation please");
-  expect(events.find((e) => e.type === "metadata").searchStatus).toBe("no-tool-record");
+  expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("no-tool-record");
   expect(JSON.parse((calls[1].messages).at(-1).content).Reference).toBe("");
 });
 
@@ -84,4 +87,31 @@ test("explicit UI verification does not depend on keyword matching", async () =>
   }));
   await response.text();
   expect(calls[0].tools).toEqual([{ type: "browser_search" }]);
+});
+
+test("failed search reports this request rather than stale ordinary metadata", async () => {
+  searchFails = true;
+  const events = await ask("source please");
+  expect(events[0].searchStatus).toBe("searching");
+  expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("search-failed");
+  expect(events.at(-1).type).toBe("error");
+});
+
+test("verification explicitly targets the latest definition, not the older Gandhi answer", async () => {
+  process.env.GROQ_API_KEY = "test-only-key";
+  process.env.GROQ_MODEL = "openai/gpt-oss-120b";
+  const response = await POST(new Request("http://localhost/api/chat", { method: "POST",
+    body: JSON.stringify({ messages: [
+      { role: "user", content: "Would Gandhi oppose AI?" },
+      { role: "assistant", content: "A tentative Gandhi interpretation." },
+      { role: "user", content: "What is AI?" },
+      { role: "assistant", content: "AI is a field of computer science." },
+      { role: "user", content: "Please verify your previous answer." },
+    ] }) }));
+  await response.text();
+  for (const call of calls) {
+    const input = JSON.parse(call.messages.at(-1).content);
+    expect(input.verificationTarget.question).toBe("What is AI?");
+    expect(input.verificationTarget.answer).toBe("AI is a field of computer science.");
+  }
 });

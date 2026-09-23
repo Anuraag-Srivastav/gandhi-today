@@ -25,7 +25,8 @@ Set **`GROQ_API_KEY`** in the Vercel project: Settings → Environment Variables
 - Only returned tool records enter the Reference input. The research model's generated summary is discarded. No tool record means no claimed successful verification.
 - The final user message contains JSON Question and Reference values. The unused template footer is removed from the system message; user text is never interpolated into system instructions.
 - The latest retrieved evidence is retained in a signed, 24-hour token in browser memory and supplied on following turns. Signing uses the server's existing Groq key with a purpose-specific prefix. It prevents tampering, not reading: the token contains public source text, not secrets. A new search replaces the previous evidence bundle; a search without results retains the earlier bundle.
-- Evidence over 32,000 characters produces an explicit request to narrow the source question rather than silently truncating passages.
+- Large tool results are reduced to bounded, query-relevant verbatim windows with source metadata and explicit partial-evidence markers. Generated research summaries are not evidence. Missing excerpts do not prove absence.
+- Verification carries the exact latest assistant answer and its question in both research and answer requests. Request metadata is emitted before search and updated on failure, avoiding stale diagnostics from a preceding turn.
 - Up to 80 messages / 100,000 total characters are retained. Excess context is rejected explicitly; no silent 24-message trimming. New inquiry clears both conversation and evidence.
 - The response is newline-delimited JSON containing status, metadata, text, done or error events. The UI renders HTTP(S) links and removes interrupted replies from later model history.
 - **Test details** shows prompt version/hash, model, search status, executed-tool count and request ID. Server logs contain this metadata, not question text, source passages or API keys.
