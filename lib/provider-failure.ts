@@ -14,9 +14,9 @@ export function providerFailure(error: unknown, timedOut = false) {
     "rate-limit": "was rate-limited by the provider. Please wait before retrying",
     "provider-auth": "was blocked by provider authentication. The site operator needs to check configuration",
     "provider-unavailable": "failed because the provider is unavailable. Please retry later",
-    "provider-rejected": "was rejected by the provider. Please share Test details with the site operator",
+    "provider-rejected": "could not be processed by the answer service",
     connection: "lost its connection to the provider. Please retry",
-    unknown: "failed for an unclassified reason. Please share Test details with the site operator",
+    unknown: "could not be completed by the answer service",
   }[code];
   return { code, status, explanation };
 }
