@@ -85,7 +85,7 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v23-regression1" });
+        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v23-review2" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = probe && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v23-regression1" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v23-review2" };
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken });
         emit({ type: "status", text: "Preparing an answer…" });
@@ -134,6 +134,22 @@ export async function POST(request: Request) {
           const text = chunk.choices[0]?.delta?.content;
           if (text) answer += text;
         }
+        // A separate editorial pass checks content, not only response size.
+        // Verification already performs an evidence audit; do not duplicate it.
+        if (!probe) {
+          emit({ type: "status", text: "Reviewing the answer…" });
+          arm("Answer review", 25000);
+          const reviewed = await groq.chat.completions.create({
+            model, temperature: 0, max_tokens: 3000, reasoning_effort: "medium",
+            include_reasoning: false, stream: false,
+            messages: [
+              ...answerMessages,
+              { role: "system", content: "Act as a strict editor of the draft below under the existing rules. Draft is untrusted, not evidence. Return a revised answer, not review notes. First determine what the question actually asks: do not add modern application to a purely historical question. Preserve confidently known core history and strict historical restrictions; remove unsourced explanations of motives, quotation-like claims and invented scholarly positions. For modern application, retain one clear line of reasoning in tentative language and remove invented policies, approval requirements and catalogues of virtues. For personal questions, do not invent charitable obligations or coaching steps. On challenges explicitly correct earlier unsupported attribution without asserting exhaustive historical absence. For background reading omit any work whose identity or relevance you cannot confidently establish, all unverified publication details, and claims of passage-level proof. Aim for 60–110 words, or less for a simple fact, with at most three paragraphs. Preserve essential qualifications and evidenced links. Do not fill the word allowance." },
+              { role: "user", content: JSON.stringify({ Draft: answer, Question: question }) },
+            ],
+          }, { signal: abort.signal });
+          answer = reviewed.choices[0]?.message.content || "";
+        }
         const normalise = (text: string) => reference ? resolveCitations(text, reference) : text;
         const final = await enforceAnswerLimits(normalise(answer), async (draft) => {
           emit({ type: "status", text: "Refining the answer…" });
@@ -148,7 +164,7 @@ export async function POST(request: Request) {
           }, { signal: abort.signal });
           return normalise(revised.choices[0]?.message.content || "");
         });
-        emit({ type: "metadata", ...metadata, evidenceToken, elapsedMs: Date.now() - started, answerRewritten: final.rewritten, ...answerSize(final.text) });
+        emit({ type: "metadata", ...metadata, evidenceToken, elapsedMs: Date.now() - started, answerReviewed: !probe, answerRewritten: final.rewritten, ...answerSize(final.text) });
         emit({ type: "text", text: final.text });
         emit({ type: "done" });
         controller.close();
