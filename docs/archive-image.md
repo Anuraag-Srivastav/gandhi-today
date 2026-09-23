@@ -21,6 +21,10 @@ crop uses the supplied 1460 × 2288 original and strips metadata during encoding
 Only body handwriting is used for decoration; the complete letter is confined
 to `/about`. Neither image is social metadata, branding, or answer content.
 
+The About page caps the letter at 420px high without cropping or stretching.
+At desktop widths the transcription sits alongside it; below 768px they stack.
+The image and a labelled link open the full-size WebP in a new tab for inspection.
+
 The texture is a server-rendered slot, omitted when disabled and removed when
 a conversation starts. It is lazy, low-priority, clipped to the header at 5%
 opacity. There is no dark theme. The enabled header eyebrow uses the existing
