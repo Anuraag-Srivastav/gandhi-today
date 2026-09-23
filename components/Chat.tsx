@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
+import { TEST_QUESTIONS } from "@/lib/test-questions";
 
 function renderLinks(text: string) {
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+)/g;
@@ -66,6 +67,8 @@ export function Chat() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState("Preparing an answer…");
   const [diagnostic, setDiagnostic] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("low");
+  const [failedRequest, setFailedRequest] = useState<{ content: string; verifySources: boolean } | null>(null);
   const evidenceRef = useRef("");
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -90,7 +93,7 @@ export function Chat() {
     return "Ask a present-day question";
   }, [hasConversation, isLoading, progress]);
 
-  async function send(content: string, verifySources = false) {
+  async function send(content: string, verifySources = false, retry = false) {
     const trimmed = content.trim();
     if (isLoading) return;
     if (!trimmed) {
@@ -100,13 +103,14 @@ export function Chat() {
     }
 
     const nextMessages: ChatMessage[] = [
-      ...messages,
+      ...(retry && messages.at(-1)?.role === "user" && messages.at(-1)?.content === trimmed ? messages.slice(0, -1) : messages),
       { role: "user", content: trimmed },
     ];
 
     setMessages(nextMessages);
     setInput("");
     setError(null);
+    setFailedRequest(null);
     setDiagnostic("New request starting…");
     setIsLoading(true);
     setProgress(verifySources ? "Checking sources…" : "Preparing an answer…");
@@ -118,7 +122,7 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources }),
+        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources, reasoningEffort }),
         signal: controller.signal,
       });
 
@@ -148,7 +152,7 @@ export function Chat() {
         if (event.type === "status") setProgress(event.text);
         if (event.type === "metadata") {
           if (typeof event.evidenceToken === "string") evidenceRef.current = event.evidenceToken;
-          setDiagnostic([event.promptVersion, event.promptHash, event.model, "search: " + event.searchStatus, "tools: " + event.toolsExecuted, "request: " + event.requestId].join(" · "));
+          setDiagnostic([event.promptVersion, event.promptHash, event.model, event.experiment, event.reasoningEffort && "reasoning: " + event.reasoningEffort, "search: " + event.searchStatus, "tools: " + event.toolsExecuted, event.stage, event.failureCode && "failure: " + event.failureCode, event.providerStatus && "provider HTTP: " + event.providerStatus, typeof event.elapsedMs === "number" && "elapsed: " + Math.round(event.elapsedMs / 1000) + "s", "request: " + event.requestId].filter(Boolean).join(" · "));
         }
         if (event.type === "error") throw new Error(event.text);
         if (event.type === "done") completed = true;
@@ -171,6 +175,7 @@ export function Chat() {
       if (!completed && !controller.signal.aborted) throw new Error("The answer was interrupted. Please retry.");
     } catch (caught) {
       if (controller.signal.aborted) return;
+      setFailedRequest({ content: trimmed, verifySources });
       setMessages((current) => {
         const last = current.at(-1);
         if (last?.role === "assistant") {
@@ -208,6 +213,7 @@ export function Chat() {
     abortRef.current = null;
     evidenceRef.current = "";
     setDiagnostic("");
+    setFailedRequest(null);
     setMessages([]);
     setError(null);
     setIsLoading(false);
@@ -224,6 +230,7 @@ export function Chat() {
                 {error}
               </p>
             ) : null}
+            {error && failedRequest && !isLoading ? <button type="button" className="mb-3 text-sm underline" onClick={() => void send(failedRequest.content, failedRequest.verifySources, true)}>Retry request</button> : null}
             <label htmlFor="gandhi-question" className="mb-2 block text-sm font-medium text-ink">Your question</label>
             <div className="flex items-end gap-2 rounded-2xl border border-saffron/50 bg-paper px-3 py-2 focus-within:ring-2 focus-within:ring-saffron/40">
               <textarea
@@ -268,6 +275,20 @@ export function Chat() {
               </button>
             ) : null}
             {diagnostic ? <details className="mt-2 text-xs text-ink-soft"><summary>Test details</summary><p className="break-words">{diagnostic}</p></details> : null}
+            <details className="mt-3 text-sm text-ink-soft">
+              <summary>Test questions and settings</summary>
+              <p className="my-2">Start a New inquiry for each topic. Compare the same questions on Low and Medium. Source checks always use Medium.</p>
+              <label className="block" htmlFor="test-reasoning">Answer reasoning</label>
+              <select id="test-reasoning" value={reasoningEffort} disabled={hasConversation || isLoading} onChange={e => setReasoningEffort(e.target.value)} className="my-2 w-full rounded border border-earth/20 bg-paper p-2">
+                <option value="low">Low (baseline)</option><option value="medium">Medium (comparison)</option>
+              </select>
+              {hasConversation ? <p>Start a New inquiry to change reasoning.</p> : null}
+              <label className="block" htmlFor="test-question">Load a question into the input</label>
+              <select id="test-question" value="" disabled={isLoading} onChange={e => { setInput(e.target.value); setError(null); textareaRef.current?.focus(); }} className="my-2 w-full min-w-0 rounded border border-earth/20 bg-paper p-2">
+                <option value="">Choose a test question…</option>
+                {TEST_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+              </select>
+            </details>
           </form>
   );
 

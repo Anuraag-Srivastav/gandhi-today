@@ -2,7 +2,11 @@
 export function resolveCitations(answer: string, reference: string) {
   let excerpts: { path: string; sourceUrl?: string }[] = [];
   try { excerpts = JSON.parse(reference).excerpts || []; } catch { /* No source bundle. */ }
-  const linked = answer.replace(/【(record\[\d+\][^】]*)】|\[\[(record\[\d+\][^\]]*)\]\]/g, (_marker, first, second) => {
+  const prepared = answer.replace(/【Source】(https?:\/\/[^\s【】]+)/g, (_match, raw) => {
+    const url = raw.replace(/[.,;]+$/, "");
+    return ` [Source](${url})${raw.slice(url.length)} `;
+  });
+  const linked = prepared.replace(/【(record\[\d+\][^】]*)】|\[\[(record\[\d+\][^\]]*)\]\]/g, (_marker, first, second) => {
     const id = first || second;
     const source = excerpts.find((excerpt) => excerpt.path === id);
     if (!source?.sourceUrl || !/^https?:\/\//i.test(source.sourceUrl)) {

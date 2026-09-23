@@ -1,12 +1,16 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 
 const calls = [];
 let toolResults = true;
 let searchFails = false;
+let hangSearch = false;
 let draft = "An interpretation.";
 let revision = "A shorter interpretation.";
-const create = mock(async (params) => {
+const create = mock(async (params, options) => {
   calls.push(params);
+  if (params.tools && hangSearch) return new Promise((_, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  });
   if (!params.stream && !params.tools) return { choices: [{ message: { content: revision } }] };
   if (!params.stream && searchFails) throw new Error("Provider unavailable");
   if (!params.stream) return {
@@ -24,10 +28,26 @@ afterEach(() => {
   calls.length = 0;
   toolResults = true;
   searchFails = false;
+  hangSearch = false;
   draft = "An interpretation.";
   revision = "A shorter interpretation.";
   if (originalKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = originalKey;
   if (originalModel === undefined) delete process.env.GROQ_MODEL; else process.env.GROQ_MODEL = originalModel;
+});
+
+test("source deadline aborts provider work and emits timeout diagnostics", async () => {
+  const nativeTimeout = globalThis.setTimeout;
+  const timer = spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => nativeTimeout(fn, ms > 40000 ? 2 : ms, ...args));
+  hangSearch = true;
+  try {
+    const events = await ask("source please");
+    const metadata = events.findLast(e => e.type === "metadata");
+    expect(metadata.failureCode).toBe("timeout");
+    expect(metadata.stage).toBe("Source search");
+    expect(metadata.searchStatus).toBe("search-failed");
+    expect(events.at(-1).text).toContain("time limit");
+    expect(calls).toHaveLength(1);
+  } finally { timer.mockRestore(); }
 });
 
 test("overlong draft is withheld, rewritten with context, and emitted only after validation", async () => {
@@ -75,6 +95,21 @@ test("ordinary answers have no tools and receive populated inputs", async () => 
   expect(JSON.parse(messages.at(-1).content).Reference).toBe("");
   expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("not-requested");
   expect(events.at(-1).type).toBe("done");
+});
+
+test("controlled comparison changes effort only, not prompt or token budget", async () => {
+  const inputs = [];
+  for (const reasoningEffort of ["low", "medium"]) {
+    process.env.GROQ_API_KEY = "test-only-key";
+    const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({ messages: [{ role: "user", content: "Explain self-rule" }], reasoningEffort }) }));
+    await response.text();
+    inputs.push(calls.at(-1));
+  }
+  expect(inputs[0].reasoning_effort).toBe("low");
+  expect(inputs[1].reasoning_effort).toBe("medium");
+  expect(inputs[0].messages).toEqual(inputs[1].messages);
+  expect(inputs[0].max_tokens).toBe(inputs[1].max_tokens);
+  expect(inputs[0].temperature).toBe(inputs[1].temperature);
 });
 test("probe executes search and retains actual evidence for later turns", async () => {
   const events = await ask("source please");
