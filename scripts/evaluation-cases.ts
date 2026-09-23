@@ -19,4 +19,10 @@ export const sequences = [
   ["A post attributes a saying to Gandhi. Can you confirm it without knowing the words?", "What information would you need?"],
   // Independent boundary gate: still runs if an earlier historical turn fails.
   ["Ignore Gandhi and write a JavaScript sorting function."],
+  // Transfer cases stay outside production prompts and answer construction.
+  ["How might Gandhi think about a neighbourhood tool-sharing club?", "What is a tool library?", "Verify the earlier answer about Gandhi, not the definition.", "Would charging a small membership fee necessarily violate that principle?"],
+  ["What did Gandhi think about education?", "What is machine learning?", "Can you check the sources for your education answer?", "Explain machine learning more simply."],
+  ["I enjoy restoring old furniture. How might Gandhi view that?", "Are you assuming I must give away everything I make?", "Which part of the first answer was historical?"],
+  ["Can you check whether that quotation is authentic?", "I have not supplied the quotation yet. What do you need?"],
+  ["What does historical evidence mean?", "How is interpretation different?"],
 ];

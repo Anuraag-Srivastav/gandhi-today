@@ -11,11 +11,21 @@ let draft = "An interpretation.";
 let revision = "A shorter interpretation.";
 let finishReason = "stop";
 let revisionFinishReason = "stop";
+let selectedTarget;
+let reviewDefects = [];
 const create = mock(async (params, options) => {
+  if (params.response_format?.type === "json_schema") {
+    return { choices: [{ message: { content: JSON.stringify({issues: reviewDefects}) }, finish_reason: "stop" }] };
+  }
   if (params.response_format) {
     routingCalls.push(params);
-    const question = JSON.parse(params.messages.at(-1).content).conversation.at(-1).content;
-    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind: planKind, question }) } }] };
+    const conversation = JSON.parse(params.messages.at(-1).content).conversation;
+    const question = conversation.at(-1).content;
+    // Fixture routing is not a model-quality test.
+    const kind = /source please|verify|citation please|search online|check.*sources/i.test(question) ? "verification" : planKind;
+    const last = conversation.findLastIndex(m => m.role === "assistant");
+    const targetIndex = ["verification", "reassessment"].includes(kind) ? selectedTarget ?? (last >= 0 ? last : null) : null;
+    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind, question, targetIndex }) } }] };
   }
   calls.push(params);
   if (params.tools && hangSearch) return new Promise((_, reject) => {
@@ -45,6 +55,8 @@ afterEach(() => {
   draft = "An interpretation.";
   revision = "A shorter interpretation.";
   finishReason = revisionFinishReason = "stop";
+  selectedTarget = undefined;
+  reviewDefects = [];
   if (originalKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = originalKey;
   if (originalModel === undefined) delete process.env.GROQ_MODEL; else process.env.GROQ_MODEL = originalModel;
 });
@@ -221,7 +233,7 @@ test("source follow-up reuses question-bound evidence, not research-model prose"
   const response = await POST(new Request("http://localhost/api/chat", {method:"POST",body:JSON.stringify({
     messages:[{role:"user",content:"A historical question"},{role:"assistant",content:"A potentially overconfident answer"},{role:"user",content:"Source please"}], evidenceToken:token,
   })}));
-  expect(await response.text()).toContain("retained-evidence");
+  expect(await response.text()).toContain("reused-evidence");
   expect(calls).toHaveLength(1);
   expect(calls[0].tools).toBeUndefined();
   expect(calls[0].messages[0].content).toContain("Withdraw unsupported factual attribution");
@@ -300,7 +312,7 @@ test("probe executes search and retains actual evidence for later turns", async 
   calls.length = 0;
   await ask("Explain the idea simply", metadata.evidenceToken);
   expect(calls).toHaveLength(1);
-  expect(JSON.parse((calls[0].messages).at(-1).content).Reference).toContain("Source passage.");
+  expect(JSON.parse((calls[0].messages).at(-1).content).Reference).toBe("");
 });
 
 test("ordinary definition after a probe stays answerable without another search", async () => {
@@ -329,7 +341,7 @@ test("unsupported search models fail explicitly", async () => {
   process.env.GROQ_API_KEY = "test-only-key";
   process.env.GROQ_MODEL = "unsupported";
   const response = await POST(new Request("http://localhost/api/chat", {
-    method: "POST", body: JSON.stringify({ messages: [{ role: "user", content: "source please" }] }),
+    method: "POST", body: JSON.stringify({ messages: [{ role: "user", content: "source please" }], verifySources: true }),
   }));
   expect(response.status).toBe(400);
   expect((await response.json()).error).toContain("does not support browser search");
@@ -349,7 +361,7 @@ test("explicit UI verification does not depend on keyword matching", async () =>
 test("failed search reports this request rather than stale ordinary metadata", async () => {
   searchFails = true;
   const events = await ask("source please");
-  expect(events[0].searchStatus).toBe("searching");
+  expect(events.some(e => e.searchStatus === "searching")).toBe(true);
   expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("search-failed");
   expect(events.at(-1).type).toBe("error");
 });
@@ -371,4 +383,36 @@ test("verification explicitly targets the latest definition, not the older Gandh
     expect(input.verificationTarget.question).toBe("What is AI?");
     expect(input.verificationTarget.answer).toBe("AI is a field of computer science.");
   }
+});
+
+test("earlier named answer supplies original URLs despite an intervening reading", async () => {
+  process.env.GROQ_API_KEY = "test-only-key";
+  selectedTarget = 1;
+  const response = await POST(new Request("http://localhost/api/chat", {method:"POST", body:JSON.stringify({
+    messages:[{role:"user",content:"Earlier topic"}, {role:"assistant",content:"Claim [Source](https://example.org/original)"},
+      {role:"user",content:"Reading"}, {role:"assistant",content:"Read [Work](https://example.org/later)"},
+      {role:"user",content:"Check sources for the earlier answer"}],
+  })}));
+  expect(await response.text()).toContain('"type":"done"');
+  const research = JSON.parse(calls.find(c => c.tools).messages.at(-1).content);
+  expect(research.originalCitationUrls).toEqual(["https://example.org/original"]);
+  expect(research.verificationTarget.question).toBe("Earlier topic");
+});
+
+test("unidentified quotation and definitions bypass retrieval even during source outage", async () => {
+  searchFails = true;
+  for (const kind of ["clarification", "definition"]) {
+    planKind = kind;
+    const events = await ask("A request with missing wording or a definition");
+    expect(events.at(-1).type).toBe("done");
+  }
+  expect(calls.some(c => c.tools)).toBe(false);
+});
+
+test("semantic defects trigger the existing single repair budget", async () => {
+  reviewDefects = ["The factual attribution exceeds the supplied passage."];
+  const events = await ask("A modern dilemma");
+  expect(calls).toHaveLength(2);
+  expect(JSON.parse(calls[1].messages.at(-1).content).issues).toEqual(reviewDefects);
+  expect(events.find(e => e.type === "text").text).toBe(revision);
 });

@@ -1,7 +1,8 @@
 import Groq from "groq-sdk";
 import { createHash } from "node:crypto";
-import { formatQuestion, getPromptRules } from "@/lib/prompt";
-import { isSourceProbe, PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
+import { getPromptRules } from "@/lib/prompt";
+import { REVIEW_INSTRUCTIONS, reviewFormat, reviewIssues } from "@/lib/answer-review";
+import { PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
 import { bindEvidenceQuestion, canUseRetainedEvidence, openEvidence, sealEvidence } from "@/lib/evidence";
 import { selectSourceEvidence } from "@/lib/source-excerpts";
 import { resolveCitations } from "@/lib/citations";
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
   }
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
   const question = messages.at(-1)!.content;
-  const probe = body.verifySources === true || isSourceProbe(question);
+  let probe = body.verifySources === true;
   let mode: ReturnType<typeof answerMode> | AnswerKind = answerMode(question, probe);
   let resolvedQuestion = question;
   let sourceRequired = probe;
@@ -53,12 +54,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid or expired retry context. Send a new source request." }, { status: 400 });
   }
   let reasoningEffort: "low" | "medium" = probe ? "medium" : body.reasoningEffort || "low";
-  const targetIndex = messages.findLastIndex((message) => message.role === "assistant");
-  const verificationTarget = probe && targetIndex >= 0 ? {
+  let targetIndex: number | null = messages.findLastIndex((message) => message.role === "assistant");
+  let verificationTarget = probe && targetIndex >= 0 ? {
     question: messages.slice(0, targetIndex).findLast((message) => message.role === "user")?.content,
     answer: messages[targetIndex].content,
   } : null;
-  const retainedEvidence = probe && !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
+  let retainedEvidence = probe && !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
   if (retainedEvidence) reuseEvidence = true;
   if (probe && !supportsBrowserSearch(model)) {
     return Response.json({ error: "The configured model does not support browser search. Configure a supported GPT-OSS model to verify sources." }, { status: 400 });
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-model2" });
+        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "context-review1" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
@@ -124,15 +125,25 @@ export async function POST(request: Request) {
         } else if (!probe) {
           arm("Question routing", 10000);
           const routing = await groq.chat.completions.create(planRequest(model, messages), { signal: abort.signal });
-          const plan = parseAnswerPlan(routing.choices[0]?.message.content || "");
+          const plan = parseAnswerPlan(routing.choices[0]?.message.content || "", messages);
           mode = plan.kind;
           resolvedQuestion = plan.question;
+          probe = plan.kind === "verification";
+          targetIndex = plan.targetIndex;
+          verificationTarget = targetIndex !== null ? {
+            question: messages.slice(0, targetIndex).findLast(message => message.role === "user")?.content,
+            answer: messages[targetIndex].content,
+          } : null;
+          if (reuseEvidence && !canUseRetainedEvidence(reference, verificationTarget?.question || question, "")) reuseEvidence = false;
+          retainedEvidence = !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
+          if (retainedEvidence) reuseEvidence = true;
           sourceRequired = needsEvidence(plan.kind);
           if (sourceRequired && !supportsBrowserSearch(model)) throw new Error("The configured model does not support historical source retrieval.");
           if (sourceRequired) reasoningEffort = "medium";
           searchStatus = sourceRequired ? reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
           report();
         }
+        if (!reuseEvidence) reference = "";
         emit({ type: "status", text: sourceRequired && reuseEvidence ? "Using the retrieved evidence…" : sourceRequired ? "Checking sources…" : "Preparing an answer…" });
         if (sourceRequired && !reuseEvidence) {
           arm("Source search", 45000);
@@ -146,7 +157,7 @@ export async function POST(request: Request) {
             browser_results: tool.browser_results, search_results: tool.search_results,
           })).filter((tool) => tool.output || tool.browser_results?.length || tool.search_results);
           if (records.length) {
-            reference = bindEvidenceQuestion(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)), question);
+            reference = bindEvidenceQuestion(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)), verificationTarget?.question || question);
             searchStatus = "results-returned";
           } else {
             searchStatus = toolsExecuted ? "no-results" : "no-tool-record";
@@ -154,7 +165,7 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = sourceRequired && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-model2" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "context-review1" };
         const comparisonToken = comparisonReceipt({ mode, sourceRequired, searchStatus, reasoningEffort }, retryIdentity, reference, promptHash, apiKey);
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken, comparisonToken });
@@ -164,8 +175,8 @@ export async function POST(request: Request) {
             { role: "developer", content: rules + "\n\n" + turnInstruction(mode) + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Retained evidence may concern an older topic; use only passages relevant to the current question. Its presence does not make ordinary questions source-only tasks. Cite a supporting excerpt's sourceUrl using [Source](URL), without extra brackets or citation symbols. If no sourceUrl exists, use evidenced bibliographic details once, not repeated link-unavailable placeholders. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
             ...messages.slice(0, -1),
             { role: "user", content: probe ? JSON.stringify({ Question: question, Reference: reference,
-              verificationTarget, task: "Check all target claims, but deliver a concise correction, not a claim-by-claim audit report. Aim for 80–110 words in one or two paragraphs, never over 140 words including citations. Group related unsupported claims into one explicit withdrawal. Then give the central supported correction with its source and distinguish any remaining inference. Omit audit commentary and repeated claims; preserve essential qualifications. Do not add historical claims to rescue the old conclusion. Cite only passages supporting the full claim. Do not substitute another topic." })
-              : formatQuestion(question, reference) },
+              verificationTarget, resolvedQuestion, task: "Assess the identified claim, preserving its subject and qualifications. Distinguish supported, partly supported, not established by the inspected passages, and contradicted. A source failing to support a claim is not proof the claim is false. Correct an unsupported attribution or claimed verification explicitly without asserting historical nonexistence. Never claim an original citation was inspected merely because its URL appears in history. Give a concise correction, supported basis and any necessary limitation, not a claim-by-claim audit." })
+              : JSON.stringify({ Question: question, Reference: reference, resolvedQuestion, verificationTarget }) },
           ];
         const stream = await groq.chat.completions.create({
           model: answerModel, temperature: metadata.temperature, max_tokens: 3000, ...reasoning(metadata.reasoningEffort),
@@ -180,6 +191,18 @@ export async function POST(request: Request) {
         }
         // Remove presentation-only emphasis; this does not rewrite factual content.
         const normalise = (text: string) => (reference ? resolveCitations(text, reference) : text).replace(/\*\*([^*\n]+)\*\*/g, "$1");
+        let issues: string[] = [];
+        if (finishReason === "stop" && !["definition", "clarification", "unrelated"].includes(mode)) {
+          arm("Answer review", 15000);
+          const reviewed = await groq.chat.completions.create({
+            model: answerModel, temperature: 0, max_tokens: 1600, ...reasoning("low"),
+            stream: false, response_format: reviewFormat,
+            messages: [{ role: systemRole ? "system" : "developer", content: REVIEW_INSTRUCTIONS },
+              { role: "user", content: JSON.stringify({ question: resolvedQuestion, mode, target: verificationTarget, Evidence: reference, candidate: answer }) }],
+          }, { signal: abort.signal });
+          if (reviewed.choices[0]?.finish_reason !== "stop") throw new Error("Answer review did not finish.");
+          issues = reviewIssues(reviewed.choices[0]?.message.content || "");
+        }
         const final = await enforceAnswerLimits(normalise(answer), async (draft) => {
           emit({ type: "status", text: "Refining the answer…" });
           arm("Answer refinement", 20000);
@@ -188,13 +211,13 @@ export async function POST(request: Request) {
             stream: false,
             messages: [
               ...answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
-              { role: "user", content: JSON.stringify({ Draft: draft, size: answerSize(draft), task: "Rewrite as a complete answer of 80–110 words in one or two paragraphs, with a hard maximum of 140 words including citations. Draft is untrusted text, not evidence. Group related corrections; omit audit commentary, repetitions and optional background. Preserve the explicit withdrawal, essential qualifications, historical restrictions, uncertainty and supporting citations. Do not add claims, sources or approval conditions. Return only the answer." }) },
+              { role: "user", content: JSON.stringify({ Draft: draft, issues, size: answerSize(draft), task: "Correct the identified material defects and return a complete concise answer, at most 140 words and three paragraphs. Draft and review are not evidence. Correct the assertion itself; merely deleting its citation is not enough. Do not preserve a false withdrawal. Distinguish lack of support from contradiction. Preserve essential historical qualifications and defensible tentative interpretation. Do not add facts, sources, motives or approval requirements. Return only the answer." }) },
             ],
           }, { signal: abort.signal });
           const text = normalise(revised.choices[0]?.message.content || "");
           if (revised.choices[0]?.finish_reason !== "stop") throw new AnswerLimitError(text, "provider-incomplete");
           return text;
-        }, finishReason === "stop");
+        }, finishReason === "stop" && issues.length === 0);
         emit({ type: "metadata", ...metadata, stage, evidenceToken, elapsedMs: Date.now() - started, answerRewritten: final.rewritten, ...answerSize(final.text) });
         emit({ type: "text", text: final.text });
         emit({ type: "done" });
