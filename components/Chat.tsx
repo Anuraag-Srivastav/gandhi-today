@@ -2,7 +2,6 @@
 
 /** One composer and one visible structured result. Verification replaces its target, not the conversation. */
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import Link from "next/link";
 import type { ChatMessage } from "@/lib/types";
 import { resultContext, type InquiryResult as Result } from "@/lib/inquiry-result";
 import { SiteFrame } from "./SiteFrame";
@@ -120,6 +119,5 @@ export function Chat() {
     <p role="status" aria-live="polite" className={busy === "answer" ? "progress-note request-progress" : "sr-only"}>{status}</p>
     {entries.length > 1 && <details className="previous-inquiries"><summary>Earlier inquiries ({entries.length - 1})</summary><nav aria-label="Earlier inquiries">{entries.filter(entry => entry.id !== activeId).map(entry => <button type="button" key={entry.id} disabled={!!busy} onClick={() => { setActiveId(entry.id); setSourceError(""); setFailed(null); }}>{entry.question}</button>)}</nav></details>}
     <div ref={resultRef} tabIndex={-1} className="result-focus">{active && <InquiryResult question={active.question} result={active.result} checked={active.checked} checking={busy === "sources"} busy={!!busy} error={sourceError} onVerify={verify} onFollowUp={populate} />}</div>
-    <aside className="quiz-promo"><div><span className="eyebrow">A different way to explore</span><h2>पाँच सवाल। थोड़ा आत्मचिंतन।</h2><p>Explore five Gandhian ideas in a short Hindi quiz, with explanations and sources.</p></div><Link href="/quiz" className="quiz-link">Try the quiz →</Link></aside>
   </SiteFrame>;
 }
