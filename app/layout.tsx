@@ -24,7 +24,9 @@ const outfit = Outfit({
 export const metadata: Metadata = {
   title: "What would Gandhi say today?",
   description:
-    "A historically grounded reconstruction of how Mahatma Gandhi might speak to present-day issues.",
+    "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",
+  openGraph: { description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources." },
+  twitter: { description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources." },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

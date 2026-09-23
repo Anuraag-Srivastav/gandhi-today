@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
+import { SUGGESTED_INQUIRIES, type ChatMessage, type AnswerMetadata } from "@/lib/types";
 import Link from "next/link";
 import { answerWithSources, plainAnswerText } from "@/lib/answer-display";
 
@@ -43,16 +43,23 @@ function renderContent(text: string) {
 }
 
 /** Keep citations below the answer rather than interrupting its sentences. */
-function AnswerContent({ text }: { text: string }) {
-  const { body, sources } = answerWithSources(text);
+function AnswerContent({ message, onQuestion, busy }: { message: ChatMessage; onQuestion: (question: string) => void; busy: boolean }) {
+  const { body, sources } = answerWithSources(message.content);
+  const concepts = Array.isArray(message.related_concepts) ? message.related_concepts.filter((value) => typeof value === "string" && value.trim()).slice(0, 3) : [];
   return <>
+    {message.safety_flag === true && <p className="font-ui text-xs leading-5 text-ink-soft">If you or someone else is in danger now, contact local emergency services (112 in India). This site can help you think, not keep you safe.</p>}
+    {message.answer_type === "historical" && <p className="font-ui text-xs leading-5 text-ink-soft">From the historical record</p>}
+    {message.answer_type === "interpretive" && <p className="font-ui text-xs leading-5 text-ink-soft">An interpretation of his principles</p>}
     {renderContent(body)}
     {sources.length > 0 && <nav aria-label="Sources for this answer" className="font-ui mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-earth/15 pt-2 text-xs leading-5 text-ink-soft">
+      <p className="w-full">{message.answer_type === "interpretive" ? "Principle drawn from" : "Read the passage"}</p>
       {sources.map((source, index) => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 max-w-full items-center gap-1.5 underline underline-offset-4 hover:text-saffron-deep">
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="shrink-0"><path d="M14 3h7v7M21 3 10 14M10 3H4v17h17v-6" /></svg>
         <span>Source{sources.length > 1 ? ` ${index + 1}` : ""} · {source.label}</span>
       </a>)}
     </nav>}
+    {message.completed && sources.length > 0 && message.is_refusal !== true && <button type="button" disabled={busy} className="font-ui min-h-11 rounded-full border border-earth/20 px-3 py-2 text-xs text-earth disabled:opacity-50" onClick={() => onQuestion("Which parts of this are documented?")}>Which parts of this are documented?</button>}
+    {concepts.length > 0 && <div className="font-ui flex flex-wrap items-center gap-2 text-xs text-ink-soft">Related: {concepts.map((concept, index) => <button key={index} type="button" disabled={busy} className="min-h-11 rounded-full border border-earth/20 px-3 py-2 disabled:opacity-50" onClick={() => onQuestion(`Tell me more about ${concept}.`)}>{concept}</button>)}</div>}
   </>;
 }
 
@@ -105,7 +112,7 @@ export function Chat() {
   const statusLabel = useMemo(() => {
     if (isLoading) return progress;
     if (hasConversation) return "Gandhi's views and interpretation";
-    return "Ask a present-day question";
+    return "Ask a question";
   }, [hasConversation, isLoading, progress]);
 
   async function send(content: string, verifySources = false, retry = false) {
@@ -137,7 +144,7 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources, retryToken: retry ? retryTokenRef.current : undefined }),
+        body: JSON.stringify({ messages: nextMessages.map(({ role, content }) => ({ role, content })), evidenceToken: evidenceRef.current, verifySources, retryToken: retry ? retryTokenRef.current : undefined }),
         signal: controller.signal,
       });
 
@@ -159,11 +166,20 @@ export function Chat() {
       let assistant = "";
       let pending = "";
       let completed = false;
+      let answerMetadata: AnswerMetadata = {};
       setMessages([...nextMessages, { role: "assistant", content: "" }]);
 
       function consume(line: string) {
         if (!line.trim() || controller.signal.aborted) return;
         const event = JSON.parse(line);
+        if (["metadata", "text", "done"].includes(event.type)) {
+          answerMetadata = { ...answerMetadata,
+            ...(event.answer_type === "historical" || event.answer_type === "interpretive" ? { answer_type: event.answer_type } : {}),
+            ...(typeof event.safety_flag === "boolean" ? { safety_flag: event.safety_flag } : {}),
+            ...(typeof event.is_refusal === "boolean" ? { is_refusal: event.is_refusal } : {}),
+            ...(Array.isArray(event.related_concepts) ? { related_concepts: event.related_concepts.filter((value: unknown) => typeof value === "string") } : {}),
+          };
+        }
         if (event.type === "status") setProgress(event.text);
         if (event.type === "metadata") {
           if (typeof event.evidenceToken === "string") evidenceRef.current = event.evidenceToken;
@@ -178,8 +194,8 @@ export function Chat() {
         if (event.type === "done") completed = true;
         if (event.type === "text") {
           assistant += event.text;
-          setMessages([...nextMessages, { role: "assistant", content: assistant }]);
         }
+        if (["metadata", "text", "done"].includes(event.type)) setMessages([...nextMessages, { role: "assistant", content: assistant, ...answerMetadata, completed }]);
       }
       while (true) {
         const { value, done } = await reader.read();
@@ -262,7 +278,7 @@ export function Chat() {
                 onChange={(event) => { setInput(event.target.value); setError(null); }}
                 onKeyDown={onKeyDown}
                 rows={1}
-                placeholder="Ask what Gandhi might say about a present-day issue…"
+                placeholder="Ask about his views, his life, or a question you're facing…"
                 className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-[15px] text-ink outline-none placeholder:text-ink-soft/80"
               />
               {isLoading ? (
@@ -288,7 +304,7 @@ export function Chat() {
               )}
             </div>
             <p className="font-ui mt-2 text-center text-[11px] tracking-wide text-ink-soft">
-              Interpretation is distinct from verified history.
+              Includes his critics, not just his admirers.
             </p>
             {hasConversation && !isLoading && messages.at(-1)?.role === "assistant" ? (
               <button type="button" className="mt-2 text-sm underline" onClick={() => void send("Please verify the sources for your previous answer and correct any unsupported claims.", true)}>
@@ -310,14 +326,13 @@ export function Chat() {
           </div>
           <div>
             <p className="font-ui text-[11px] tracking-[0.28em] text-earth uppercase">
-              Contextual reconstruction
+              His record, and what it might mean now
             </p>
             <h1 className="font-display text-[1.85rem] leading-none font-semibold text-ink italic sm:text-[2.15rem]">
               What would Gandhi say today?
             </h1>
             <p className="mt-1.5 max-w-md text-sm leading-relaxed text-ink-soft">
-              Explore Gandhi&apos;s ideas and their possible application today.
-              Ask to verify sources when you want supporting evidence.
+              Ask what Gandhi actually said, or how his ideas might apply to your question. Historical answers link to sources. Modern applications are marked as interpretation.
             </p>
           </div>
         </div>
@@ -341,9 +356,6 @@ export function Chat() {
             <p className="font-ui text-[11px] tracking-[0.18em] text-earth uppercase">
               {statusLabel}
             </p>
-            <p className="font-ui hidden text-[11px] text-ink-soft sm:block">
-              Not an authentic quotation
-            </p>
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-8">
@@ -354,10 +366,10 @@ export function Chat() {
                     <Charkha className="h-9 w-9" />
                   </div>
                   <p className="font-display text-2xl leading-tight text-ink italic sm:text-3xl">
-                    Satya, ahimsa, swaraj — applied to this century.
+                    What he said, and what it might mean now.
                   </p>
                   <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
-                    Explore a question through Gandhi&apos;s principles. Modern applications are interpretations, not his recorded words.
+                    Modern applications are interpretations, not his recorded words.
                   </p>
                 </div>
                 <div>
@@ -418,7 +430,7 @@ export function Chat() {
                               isUser ? "text-paper" : "text-ink"
                             }`}
                           >
-                            {isUser ? renderContent(message.content) : <AnswerContent text={message.content} />}
+                            {isUser ? renderContent(message.content) : <AnswerContent message={message} busy={isLoading} onQuestion={(question) => void send(question)} />}
                           </div>
                         )}
                       </div>
