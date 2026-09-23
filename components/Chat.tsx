@@ -18,6 +18,7 @@ function renderLinks(text: string) {
     parts.push(text.slice(previous, match.index));
     const href = (match[2] || match[3]).replace(/[.,;]+$/, "");
     parts.push(<a key={match.index} href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{match[1] || href}</a>);
+    if (match[3]) parts.push(match[3].slice(href.length));
     previous = match.index! + match[0].length;
   }
   parts.push(text.slice(previous));
@@ -214,19 +215,20 @@ export function Chat() {
             className={(hasConversation ? "border-t " : "border-b ") + "border-earth/10 bg-paper/80 px-4 py-4 sm:px-6"}
           >
             {error ? (
-              <p className="mb-3 rounded-xl border border-saffron/30 bg-saffron/10 px-3 py-2 text-sm text-saffron-deep">
+              <p role="alert" className="mb-3 rounded-xl border border-saffron/30 bg-saffron/10 px-3 py-2 text-sm text-saffron-deep">
                 {error}
               </p>
             ) : null}
             <div className="flex items-end gap-2 rounded-2xl border border-earth/15 bg-khadi/60 px-3 py-2 focus-within:border-saffron/50">
               <textarea
+                aria-label="Your question about Gandhi"
                 ref={textareaRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={onKeyDown}
                 rows={1}
                 placeholder="Ask what Gandhi might say about a present-day issue…"
-                className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] text-ink outline-none placeholder:text-ink-soft/80"
+                className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-[15px] text-ink outline-none placeholder:text-ink-soft/80"
               />
               {isLoading ? (
                 <button
@@ -309,18 +311,16 @@ export function Chat() {
 
           <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-8">
             {!hasConversation ? (
-              <div className="flex h-full flex-col justify-between gap-8">
+              <div className="flex h-full flex-col justify-between gap-5 sm:gap-8">
                 <div className="mx-auto max-w-lg text-center">
-                  <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-gold/50 text-saffron">
+                  <div className="mx-auto mb-5 hidden h-16 w-16 items-center justify-center rounded-full border border-gold/50 text-saffron sm:flex">
                     <Charkha className="h-9 w-9" />
                   </div>
-                  <p className="font-display text-3xl leading-tight text-ink italic">
+                  <p className="font-display text-2xl leading-tight text-ink italic sm:text-3xl">
                     Satya, ahimsa, swaraj — applied to this century.
                   </p>
                   <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
-                    Ask about a present-day issue. The reply reconstructs what
-                    Gandhi might say from his writings, speeches, and principles.
-                    Interpretations are not authentic quotations. Source checks are available on request.
+                    Explore a question through Gandhi&apos;s principles. Modern applications are interpretations, not his recorded words.
                   </p>
                 </div>
                 <div>
@@ -377,7 +377,7 @@ export function Chat() {
                           </div>
                         ) : (
                           <div
-                            className={`prose-gandhi text-[15.5px] leading-7 ${
+                            className={`prose-gandhi break-words text-[15.5px] leading-7 ${
                               isUser ? "text-paper" : "text-ink"
                             }`}
                           >

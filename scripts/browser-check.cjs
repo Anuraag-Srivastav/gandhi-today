@@ -1,0 +1,74 @@
+/** Browser regression checks using controlled API replies, not live model evaluations.
+ * Run with PLAYWRIGHT_MODULE pointing to an installed playwright package and
+ * CHAT_TEST_URL pointing to a running app (defaults to localhost:3107).
+ */
+// CommonJS permits reusing an existing Playwright install without an app dependency.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    for (const width of [390, 1280]) {
+      const page = await browser.newPage({ viewport: { width, height: 844 } });
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      const requests = [];
+      let failure = false;
+      let interrupted = false;
+      await page.route('**/api/chat', async route => {
+        requests.push(route.request().postDataJSON());
+        const events = [
+          { type: 'metadata', promptVersion: 'v18', promptHash: 'test', model: 'mock', searchStatus: failure ? 'search-failed' : 'results-returned', toolsExecuted: 1, requestId: 'browser-test', evidenceToken: 'signed-test-token' },
+          ...(failure ? [{ type: 'error', text: 'Source service unavailable. Please retry.' }] : [
+            { type: 'text', text: 'A cautious interpretation. [Source](https://example.org/gandhi). See https://example.org/reading.' },
+            ...(interrupted ? [] : [{ type: 'done' }]),
+          ]),
+        ];
+        await route.fulfill({ contentType: 'application/x-ndjson', body: events.map(e => JSON.stringify(e)).join('\n') + '\n' });
+      });
+      await page.goto(process.env.CHAT_TEST_URL || 'http://localhost:3107');
+      const input = page.getByRole('textbox', { name: 'Your question about Gandhi' });
+      await input.waitFor();
+      const heading = await page.getByText('Begin with an inquiry', { exact: true }).boundingBox();
+      const box = await input.boundingBox();
+      const suggestion = await page.getByRole('button', { name: /climate change/ }).boundingBox();
+      assert(heading.y < box.y && box.y < suggestion.y, 'home order');
+      assert(box.y + box.height < 844, 'input visible without scrolling');
+      assert.equal(await input.count(), 1);
+      await input.fill('What did Gandhi think about money?');
+      await input.press('Enter');
+      await page.getByRole('button', { name: 'Verify sources' }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'Source', exact: true }).getAttribute('href'), 'https://example.org/gandhi');
+      assert((await page.locator('article').last().innerText()).endsWith('reading.'), 'preserve punctuation');
+      await page.getByRole('button', { name: 'Verify sources' }).click();
+      await page.getByRole('button', { name: 'Verify sources' }).waitFor();
+      assert.equal(requests[1].verifySources, true);
+      assert.equal(requests[1].evidenceToken, 'signed-test-token');
+      failure = true;
+      await input.fill('Verify again');
+      await input.press('Enter');
+      await page.getByRole('alert').waitFor();
+      await page.getByText('Test details', { exact: true }).click();
+      assert((await page.locator('details').innerText()).includes('search-failed'));
+      failure = false;
+      interrupted = true;
+      await input.fill('Try again');
+      await input.press('Enter');
+      await page.getByText('The answer was interrupted. Please retry.', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'New inquiry' }).click();
+      interrupted = false;
+      await input.fill('Shall I use AI?');
+      await input.press('Enter');
+      await page.getByRole('button', { name: 'Verify sources' }).waitFor();
+      assert.equal(requests.at(-1).messages.length, 1);
+      assert.equal(requests.at(-1).evidenceToken, '');
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no page overflow');
+      assert.deepEqual(errors, []);
+      await page.screenshot({ path: `/tmp/gandhi-chat-${width}.png`, fullPage: true });
+      console.log(`PASS ${width}px: layout, accessibility label, submit, links, punctuation, verification, evidence retention, error diagnostics, interrupted stream, reset, overflow, browser errors`);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });
