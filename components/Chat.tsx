@@ -66,7 +66,6 @@ export function Chat() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState("Preparing an answer…");
   const [diagnostic, setDiagnostic] = useState("");
-  const [reasoningEffort, setReasoningEffort] = useState("low");
   const [failedRequest, setFailedRequest] = useState<{ content: string; verifySources: boolean } | null>(null);
   const evidenceRef = useRef("");
   const abortRef = useRef<AbortController | null>(null);
@@ -121,7 +120,7 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources, reasoningEffort }),
+        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources }),
         signal: controller.signal,
       });
 
@@ -274,13 +273,6 @@ export function Chat() {
               </button>
             ) : null}
             {diagnostic ? <details className="mt-2 text-xs text-ink-soft"><summary>Test details</summary><p className="break-words">{diagnostic}</p></details> : null}
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
-              <label htmlFor="test-reasoning">Answer reasoning</label>
-              <select id="test-reasoning" aria-describedby="reasoning-help" value={reasoningEffort} disabled={hasConversation || isLoading} onChange={e => setReasoningEffort(e.target.value)} className="w-24 rounded border border-earth/20 bg-paper px-2 py-1 text-xs">
-                <option value="low">Low</option><option value="medium">Medium</option>
-              </select>
-              <span id="reasoning-help">{hasConversation ? "New inquiry to change. " : ""}Source checks use Medium.</span>
-            </div>
           </form>
   );
 
