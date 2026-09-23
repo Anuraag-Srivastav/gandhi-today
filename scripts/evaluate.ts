@@ -26,6 +26,7 @@ for (const n of selected) {
         const safe = { ...event };
         delete safe.evidenceToken;
         delete safe.retryToken;
+        delete safe.comparisonToken;
         if (typeof token === "string") evidenceToken = token;
         metadata = { ...metadata, ...safe };
       }

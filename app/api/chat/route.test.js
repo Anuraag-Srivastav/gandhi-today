@@ -121,6 +121,30 @@ async function ask(content, evidenceToken = "") {
     body: JSON.stringify({ messages: [{ role: "user", content }], evidenceToken }) }));
   return (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
 }
+test("candidate replay uses identical evidence and instructions without routing or search", async () => {
+  planKind = "historical";
+  const events = await ask("A historical question");
+  const receipt = events.find(e => e.comparisonToken);
+  const original = calls.find(c => c.stream);
+  calls.length = routingCalls.length = 0;
+  const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    messages: [{ role: "user", content: "A historical question" }], evidenceToken: receipt.evidenceToken,
+    comparisonToken: receipt.comparisonToken, answerModel: "llama-3.3-70b-versatile",
+  }) }));
+  expect((await response.text())).toContain('"type":"done"');
+  expect(routingCalls).toHaveLength(0);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].model).toBe("llama-3.3-70b-versatile");
+  expect(calls[0].reasoning_effort).toBeUndefined();
+  expect(calls[0].include_reasoning).toBeUndefined();
+  expect(calls[0].messages[0].role).toBe("system");
+  expect(calls[0].messages.map(m => m.content)).toEqual(original.messages.map(m => m.content));
+  const changed = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    messages: [{ role: "user", content: "Different question" }], evidenceToken: receipt.evidenceToken,
+    comparisonToken: receipt.comparisonToken, answerModel: "llama-3.3-70b-versatile",
+  }) }));
+  expect(changed.status).toBe(400);
+});
 test("background reading retrieves bibliographic evidence before recommendation", async () => {
   planKind = "reading";
   const events = await ask("What can I read on this?");
