@@ -15,5 +15,6 @@ export type InquiryResult = {
 
 /** Conversation context is a readable serialization of typed data, not a source of evidence. */
 export function resultContext(result: InquiryResult) {
-  return JSON.stringify(result);
+  // Full excerpts stay in the signed evidence receipt. Do not duplicate them in every history turn.
+  return JSON.stringify({ ...result, sources: result.sources.map(({ id, title, url, claimSupported }) => ({ id, title, url, claimSupported })) });
 }

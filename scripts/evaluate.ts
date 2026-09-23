@@ -4,6 +4,7 @@
  */
 import { sequences } from "./evaluation-cases";
 import { answerSize } from "../lib/answer-limits";
+import { resultContext } from "../lib/inquiry-result";
 const base = process.argv[2];
 if (!base || !/^https?:\/\//.test(base)) throw new Error("Supply the app URL explicitly.");
 const selected = process.argv[3]?.split(",").map(Number) || sequences.map((_, i) => i + 1);
@@ -38,7 +39,7 @@ for (const n of selected) {
         size: answerSize(answer), malformedCitation: /【|\[Source\s*\[/.test(answer), semanticScore: "manual-review-required" }));
       if (!completed) break;
       if (events.some(e => e.type === "source-check")) messages.splice(-2, 2);
-      messages.push({ role: "assistant", content: JSON.stringify(result) });
+      messages.push({ role: "assistant", content: resultContext(result) });
     } catch (error) {
       console.log(JSON.stringify({ sequence: n, question, completed: false, failure: error instanceof Error ? error.message : "Unknown failure", elapsedMs: Date.now() - started }));
       break;

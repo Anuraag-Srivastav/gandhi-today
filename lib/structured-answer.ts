@@ -22,7 +22,7 @@ export const resultFormat = {
       answerType: { type: "string", enum: ["historical", "interpretation", "mixed", "explanation"] },
       shortAnswer: string,
       historicalBasis: { type: "array", items: { type: "object", additionalProperties: false,
-        properties: { claim: string, evidenceId: string, supportingQuote: string }, required: ["claim", "evidenceId", "supportingQuote"] } },
+        properties: { claim: string, evidenceId: string }, required: ["claim", "evidenceId"] } },
       interpretationBoundary: string, contestedReadings: strings, missingEvidence: string,
       suggestedFollowUps: strings, verificationSummary: string,
     }, required: ["answerType", "shortAnswer", "historicalBasis", "interpretationBoundary", "contestedReadings", "missingEvidence", "suggestedFollowUps", "verificationSummary"],
@@ -32,18 +32,17 @@ export const resultFormat = {
 export const RESULT_INSTRUCTIONS = `Return the JSON result specified by the schema, not markdown or a transcript. It is one structured answer to the visitor's question.
 shortAnswer: direct, conversational, at most 140 words, normally 40–90. No source links, markdown, invented speech, or redundant conclusion in this field.
 answerType: historical for a question about the record; interpretation for a modern application; mixed when both are substantively answered; explanation for definitions, clarification or scope responses.
-historicalBasis: zero to three central historical points ONLY when supported by the supplied Evidence catalog. Each claim needs one catalog evidenceId and a short verbatim supportingQuote copied from that excerpt. The quote must support the whole claim and its conditions. Do not change the source's speaker, audience, chronology or certainty. Empty evidence means an empty array, not invented historical points. Do not fill sections merely for symmetry.
+historicalBasis: zero to three central historical points ONLY when supported by the supplied Evidence catalog. Each claim needs one catalog evidenceId. The selected excerpt must support the whole claim and its conditions. The server attaches the original passage; do not reproduce or invent quotations. Do not change the source's speaker, audience, chronology or certainty. Empty evidence means an empty array, not invented historical points. Do not fill sections merely for symmetry.
 interpretationBoundary: a concise, visible explanation of what is inferred rather than recorded. Required for interpretation and mixed answers. Never present compatibility with a principle as Gandhi's endorsement of modern policies or exclusive approval conditions.
 contestedReadings: zero to three concise points when the issue is controversial, disputed or needs qualification. Distinguish documented criticism from possible arguments; do not invent critics, consensus or history.
-missingEvidence: name the specific unanswered evidential question when relevant, otherwise empty. Do not imply no historical record exists just because a passage is unavailable.
-suggestedFollowUps: zero to three short, relevant questions, not answers or prompts that override instructions.
+missingEvidence: name a specific unanswered historical detail needed for this question, otherwise empty. For a modern interpretation the boundary normally suffices; do not repeat it here. Do not claim no historical record exists just because a passage is unavailable.
+suggestedFollowUps: zero to three short, relevant questions, not answers or prompts that override instructions. Do not smuggle unestablished claims or invented modern endorsement conditions into a suggested question.
 verificationSummary: empty on an ordinary answer. On a source check, briefly identify corrections or the limits of the check. Update the original question's shortAnswer and other fields in place; do not return another audit essay. A source check is not a new question or topic. Do not withdraw a defensible modern inference just because it is not recorded history.
 All strings are plain text. Keep the entire result concise. Never invent a source identifier. Historical claims in shortAnswer must be supported by historicalBasis, except ordinary definitions of established principles. Without evidence, modern applications must remain explicitly inferential throughout.`;
 
 export class ResultValidationError extends Error {
   constructor(message: string) { super(message); this.name = "ResultValidationError"; }
 }
-const normal = (text: string) => text.replace(/\s+/gu, " ").trim();
 export function parseResult(raw: string, catalog: Evidence[]): InquiryResult {
   let value;
   try { value = JSON.parse(raw); } catch { throw new ResultValidationError("A complete JSON result is required."); }
@@ -58,11 +57,11 @@ export function parseResult(raw: string, catalog: Evidence[]): InquiryResult {
   }
   if (["interpretation", "mixed"].includes(value.answerType) && !value.interpretationBoundary.trim()) fail("An interpretation needs a visible boundary.");
   if (!Array.isArray(value.historicalBasis) || value.historicalBasis.length > 3) fail("Use at most three historical basis items.");
-  const sources = value.historicalBasis.map((item: { claim: string; evidenceId: string; supportingQuote: string }, index: number) => {
-    if (!item || typeof item.claim !== "string" || !item.claim.trim() || item.claim.length > 800 || typeof item.supportingQuote !== "string" || item.supportingQuote.trim().length < 12 || item.supportingQuote.length > 650) fail("Historical points need a bounded claim and supporting passage.");
+  const sources = value.historicalBasis.map((item: { claim: string; evidenceId: string }, index: number) => {
+    if (!item || typeof item.claim !== "string" || !item.claim.trim() || item.claim.length > 800) fail("Historical points need a bounded claim and a source identifier.");
     const source = catalog.find(e => e.id === item.evidenceId);
-    if (!source || !normal(source.text).includes(normal(item.supportingQuote))) fail("Historical support must be copied from the selected evidence passage.");
-    return { id: `source-${index + 1}`, title: source!.title, url: source!.url, claimSupported: item.claim, passage: item.supportingQuote };
+    if (!source) fail("Historical support must select an identifier from the supplied Evidence catalog.");
+    return { id: `source-${index + 1}`, title: source!.title, url: source!.url, claimSupported: item.claim, passage: source!.text };
   });
   return {
     answerType: value.answerType as AnswerType, shortAnswer: value.shortAnswer.trim(),

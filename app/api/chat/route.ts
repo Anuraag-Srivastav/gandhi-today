@@ -202,7 +202,7 @@ export async function POST(request: Request) {
         const failure = providerFailure(error, timedOut);
         failureCode = error instanceof ResultValidationError ? "result-invalid" : failure.code;
         providerStatus = failure.status;
-        console.error("gandhi-chat-failed", { requestId, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, cancelled: cancelled || request.signal.aborted });
+        console.error("gandhi-chat-failed", { requestId, stage, failureCode, providerStatus, validationIssue: error instanceof ResultValidationError ? error.message : undefined, elapsedMs: Date.now() - started, cancelled: cancelled || request.signal.aborted });
         if (!cancelled && !request.signal.aborted) {
           searchStatus = searchStatus === "searching" ? "search-failed" : "answer-failed";
           report();
