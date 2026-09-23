@@ -9,6 +9,8 @@ let searchFails = false;
 let hangSearch = false;
 let draft = "An interpretation.";
 let revision = "A shorter interpretation.";
+let finishReason = "stop";
+let revisionFinishReason = "stop";
 const create = mock(async (params, options) => {
   if (params.response_format) {
     routingCalls.push(params);
@@ -19,14 +21,14 @@ const create = mock(async (params, options) => {
   if (params.tools && hangSearch) return new Promise((_, reject) => {
     options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
   });
-  if (!params.stream && !params.tools) return { choices: [{ message: { content: revision } }] };
+  if (!params.stream && !params.tools) return { choices: [{ message: { content: revision }, finish_reason: revisionFinishReason }] };
   if (!params.stream && searchFails) throw new Error("Provider unavailable");
   if (!params.stream) return {
     choices: [{ message: { content: "MODEL SUMMARY MUST NOT BECOME EVIDENCE",
       executed_tools: toolResults ? [{ type: "browser_search", arguments: "{}", index: 0,
         browser_results: [{ title: "Primary document", url: "https://example.org/document", content: "Source passage." }] }] : [] } }],
   };
-  return (async function* () { yield { choices: [{ delta: { content: draft } }] }; })();
+  return (async function* () { yield { choices: [{ delta: { content: draft }, finish_reason: finishReason }] }; })();
 });
 mock.module("groq-sdk", () => ({ default: class { chat = { completions: { create } }; } }));
 const { POST } = await import("./route");
@@ -42,6 +44,7 @@ afterEach(() => {
   hangSearch = false;
   draft = "An interpretation.";
   revision = "A shorter interpretation.";
+  finishReason = revisionFinishReason = "stop";
   if (originalKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = originalKey;
   if (originalModel === undefined) delete process.env.GROQ_MODEL; else process.env.GROQ_MODEL = originalModel;
 });
@@ -77,6 +80,21 @@ test("failed rewrite emits no partial answer and makes no further attempts", asy
   expect(calls).toHaveLength(2);
   expect(events.some(e => e.type === "text")).toBe(false);
   expect(events.at(-1).text).toContain("response limit");
+});
+test("short provider-truncated answers are rewritten, not accepted by word count", async () => {
+  draft = "An unfinished sentence about";
+  finishReason = "length";
+  const events = await ask("Explain a principle");
+  expect(calls).toHaveLength(2);
+  expect(events.find(e => e.type === "text").text).toBe(revision);
+});
+test("incomplete rewrite is withheld even below the word limit", async () => {
+  draft = revision = "An unfinished sentence about";
+  finishReason = revisionFinishReason = "length";
+  const events = await ask("Explain a principle");
+  expect(calls).toHaveLength(2);
+  expect(events.some(e => e.type === "text")).toBe(false);
+  expect(events.findLast(e => e.type === "metadata").validation.reason).toBe("provider-incomplete");
 });
 
 test("failed verification retains bound evidence for retry without another search", async () => {
@@ -144,6 +162,13 @@ test("candidate replay uses identical evidence and instructions without routing 
     comparisonToken: receipt.comparisonToken, answerModel: "llama-3.3-70b-versatile",
   }) }));
   expect(changed.status).toBe(400);
+  draft = revision = "";
+  const failed = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    messages: [{ role: "user", content: "A historical question" }], evidenceToken: receipt.evidenceToken,
+    comparisonToken: receipt.comparisonToken, answerModel: "llama-3.3-70b-versatile",
+  }) }));
+  const failedEvents = (await failed.text()).trim().split("\n").map(JSON.parse);
+  expect(failedEvents.findLast(e => e.type === "metadata").model).toBe("llama-3.3-70b-versatile");
 });
 test("background reading retrieves bibliographic evidence before recommendation", async () => {
   planKind = "reading";

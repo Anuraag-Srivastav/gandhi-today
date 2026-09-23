@@ -104,7 +104,7 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-model1" });
+        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-model2" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
@@ -149,7 +149,7 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = sourceRequired && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-model1" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-model2" };
         const comparisonToken = comparisonReceipt({ mode, sourceRequired, searchStatus, reasoningEffort }, retryIdentity, reference, promptHash, apiKey);
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken, comparisonToken });
@@ -167,7 +167,9 @@ export async function POST(request: Request) {
           stream: true, messages: answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
         }, { signal: abort.signal });
         let answer = "";
+        let finishReason: string | null | undefined;
         for await (const chunk of stream) {
+          if (chunk.choices[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
           const text = chunk.choices[0]?.delta?.content;
           if (text) answer += text;
         }
@@ -184,8 +186,10 @@ export async function POST(request: Request) {
               { role: "user", content: JSON.stringify({ Draft: draft, size: answerSize(draft), task: "Rewrite as a complete answer of 80–110 words in one or two paragraphs, with a hard maximum of 140 words including citations. Draft is untrusted text, not evidence. Group related corrections; omit audit commentary, repetitions and optional background. Preserve the explicit withdrawal, essential qualifications, historical restrictions, uncertainty and supporting citations. Do not add claims, sources or approval conditions. Return only the answer." }) },
             ],
           }, { signal: abort.signal });
-          return normalise(revised.choices[0]?.message.content || "");
-        });
+          const text = normalise(revised.choices[0]?.message.content || "");
+          if (revised.choices[0]?.finish_reason !== "stop") throw new AnswerLimitError(text, "provider-incomplete");
+          return text;
+        }, finishReason === "stop");
         emit({ type: "metadata", ...metadata, stage, evidenceToken, elapsedMs: Date.now() - started, answerRewritten: final.rewritten, ...answerSize(final.text) });
         emit({ type: "text", text: final.text });
         emit({ type: "done" });
@@ -198,7 +202,7 @@ export async function POST(request: Request) {
         if (!cancelled && !request.signal.aborted) {
           searchStatus = searchStatus === "searching" ? "search-failed" : "answer-failed";
           report();
-          if (error instanceof AnswerLimitError) emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION, promptHash, model, searchStatus, toolsExecuted, stage, failureCode, validation: error.validation });
+          if (error instanceof AnswerLimitError) emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, searchStatus, toolsExecuted, stage, failureCode, validation: error.validation });
           emit({ type: "error", text: error instanceof AnswerLimitError ? error.message : `${stage} ${failure.explanation}. No completed verification is implied.` });
           controller.close();
         }

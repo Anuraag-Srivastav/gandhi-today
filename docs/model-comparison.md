@@ -7,3 +7,9 @@ Run `bun scripts/compare-models.ts https://www.gandhisays.com 1,2` to compare in
 The runner records answers and metadata, never signed receipts. Candidate answers advance the shared history, so paired follow-up results are conditional on that history, not independent baseline conversations. Compare evidence hashes before scoring. Failed routing/research is an application failure, not a candidate-model result. Review all five evaluation dimensions manually; passing transport tests is not a quality score.
 
 Promotion requires improved overall quality without severe factual, safety, scope or challenge regressions. Candidate access may depend on the provider account; failure is reported, not silently substituted.
+
+## Observed decision
+
+23 September 2026: retain GPT-OSS 120B. Qwen completed 33/34 paired main-run turns but retained unsupported attributions and invented defensive-force conditions. Three shared research failures prevented further pairs. Four supplemental pairs included an explicit boundary pass, a baseline 429, a truncated candidate answer and another empty candidate failure. GPT-OSS 20B failed an eight-turn qualitative screen; Llama's capability request returned 404. These are constrained application trials, not intrinsic model rankings. Qwen's provisional quality score is 5.5/10 versus the retained 5/10 production assessment, not sufficient for promotion.
+
+The trial exposed a completion-gate bug: provider-truncated prose could pass the word count. Runtime `v24-model2` now requires provider finish status `stop`; incomplete output gets at most one rewrite, whose completion status is also checked. Candidate failure metadata retains the candidate identity. This changes validation, not historical truth or prompt content.
