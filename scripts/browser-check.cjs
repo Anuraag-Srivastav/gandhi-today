@@ -19,14 +19,14 @@ const sourced = { ...sample, historicalBasis: [{ claim: 'A documented point with
       const page = await browser.newPage({ viewport: { width, height: 900 }, reducedMotion: 'reduce' });
       const errors = [], requests = [];
       page.on('pageerror', error => errors.push(error.message));
-      let failure = false, interrupted = false, delayed = false;
+      let failure = false, interrupted = false, delayed = false, olderTarget = null;
       await page.route('**/api/chat', async route => {
         const request = route.request().postDataJSON(); requests.push(request);
         const probe = request.verifySources || /verify/i.test(request.messages.at(-1).content);
         if (delayed) await new Promise(resolve => setTimeout(resolve, 500));
         const events = [
           { type: 'metadata', model: 'PRIVATE_MODEL', promptVersion: 'PRIVATE_VERSION', toolsExecuted: 999, evidenceToken: 'evidence', retryToken: 'retry' },
-          ...(probe ? [{ type: 'source-check' }] : []),
+          ...(probe ? [{ type: 'source-check', targetIndex: olderTarget ?? request.verificationTargetIndex ?? request.messages.findLastIndex(message => message.role === 'assistant') }] : []),
           ...(failure ? [{ type: 'error', text: 'Source service unavailable. Please retry.' }] : [{ type: 'result', result: probe ? sourced : sample }, ...(interrupted ? [] : [{ type: 'done' }])]),
         ];
         await route.fulfill({ contentType: 'application/x-ndjson', body: events.map(e => JSON.stringify(e)).join('\n') + '\n' });
@@ -88,6 +88,18 @@ const sourced = { ...sample, historicalBasis: [{ claim: 'A documented point with
       await page.locator('.previous-inquiries').waitFor();
       assert.equal(await article.count(), 1, 'only active inquiry displayed');
       assert(!requests.at(-1).messages.slice(0, -1).some(m => m.role === 'user' && /verify/i.test(m.content)), 'private check instructions excluded from history');
+      olderTarget = 1;
+      await input.fill('Verify the earlier answer, not the follow-up'); await input.press('Enter');
+      await page.waitForFunction(() => document.querySelector('.question-form textarea').value === '');
+      assert((await article.innerText()).includes('artificial intelligence'), 'older inquiry is selected for its correction');
+      await page.locator('.previous-inquiries summary').click();
+      await page.getByRole('navigation', { name: 'Earlier inquiries' }).getByRole('button', { name: 'A follow-up', exact: true }).click();
+      assert((await article.innerText()).includes('A follow-up'), 'later inquiry has not been replaced');
+      olderTarget = null;
+      await input.fill('Another topic'); await input.press('Enter');
+      await page.waitForFunction(() => document.querySelector('.question-form textarea').value === '');
+      assert(requests.at(-1).messages.some(message => message.content === 'A follow-up'), 'later question survives earlier correction');
+      assert.equal(requests.at(-1).messages.filter(message => message.role === 'assistant').length, 2);
       await page.getByRole('button', { name: 'What does this principle mean?' }).click();
       assert.equal(await input.inputValue(), 'What does this principle mean?');
       await page.getByRole('button', { name: 'New inquiry', exact: true }).click();

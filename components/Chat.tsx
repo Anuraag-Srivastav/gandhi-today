@@ -9,7 +9,7 @@ import { SiteFrame } from "./SiteFrame";
 import { InquiryResult } from "./InquiryResult";
 
 type Entry = { id: string; question: string; result: Result; messages: ChatMessage[]; evidenceToken: string; checked: boolean };
-type Pending = { messages: ChatMessage[]; question: string; targetId?: string; contextId?: string; evidenceToken: string; retryToken?: string };
+type Pending = { messages: ChatMessage[]; question: string; targetId?: string; contextId?: string; verifySources?: boolean; evidenceToken: string; retryToken?: string };
 const examples = [
   ["A historical view", "What did Gandhi think about money?"],
   ["A personal dilemma", "How might Gandhi think about forgiving someone who betrayed my trust?"],
@@ -47,14 +47,20 @@ export function Chat() {
     let targetId = pending.targetId;
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ messages: pending.messages, evidenceToken, verifySources: !!pending.targetId, retryToken }) });
+        body: JSON.stringify({ messages: pending.messages, evidenceToken, verifySources: pending.verifySources === true,
+          verificationTargetIndex: pending.verifySources ? entries.find(item => item.id === pending.targetId)!.messages.length - 1 : undefined, retryToken }) });
       if (!response.ok || !response.body) throw new Error("The request could not be started. Please try again.");
       const reader = response.body.getReader(); const decoder = new TextDecoder();
       let buffer = ""; let result: Result | undefined; let completed = false;
       const consume = (line: string) => {
         if (!line.trim() || controller.signal.aborted) return;
         const event = JSON.parse(line);
-        if (event.type === "source-check" && pending.contextId) { targetId = pending.contextId; setBusy("sources"); }
+        if (event.type === "source-check") {
+          const target = entries.find(item => item.messages.length === event.targetIndex + 1
+            && item.messages.every((message, index) => message.role === pending.messages[index]?.role && message.content === pending.messages[index]?.content));
+          if (!target) throw new Error("The answer selected for checking is no longer available. Select that inquiry and try again.");
+          targetId = target.id; setActiveId(target.id); setBusy("sources");
+        }
         if (event.type === "metadata") {
           if (typeof event.evidenceToken === "string") evidenceToken = event.evidenceToken;
           if (typeof event.retryToken === "string") retryToken = event.retryToken;
@@ -75,10 +81,18 @@ export function Chat() {
       if (!completed || !result) throw new Error("The answer was interrupted. Please retry; your previous result has not changed.");
       const id = targetId || crypto.randomUUID();
       // Replace the old answer and exclude the private source-check instruction from conversational history.
-      const history = targetId ? pending.messages.slice(0, -2) : pending.messages;
+      const target = entries.find(item => item.id === targetId);
+      const history = target ? target.messages.slice(0, -1) : pending.messages;
       const entry: Entry = { id, question: targetId ? entries.find(item => item.id === targetId)!.question : pending.question, result, evidenceToken, checked: !!targetId,
         messages: [...history, { role: "assistant", content: resultContext(result) }] };
-      setEntries(previous => targetId ? previous.map(item => item.id === id ? entry : item) : [...previous, entry]);
+      setEntries(previous => target ? previous.map(item => {
+        if (item.id === id) return entry;
+        // Existing branches retain the corrected answer, without losing intervening questions.
+        const samePrefix = target.messages.every((message, index) => message.role === item.messages[index]?.role && message.content === item.messages[index]?.content);
+        if (!samePrefix) return item;
+        const updated = [...item.messages]; updated[target.messages.length - 1] = entry.messages.at(-1)!;
+        return { ...item, messages: updated };
+      }) : [...previous, entry]);
       setActiveId(id); if (!pending.targetId) setInput("");
       setStatus(targetId ? "Source check completed; the result has been updated." : "Your answer is ready.");
       if (!targetId) requestAnimationFrame(() => { resultRef.current?.focus(); resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }); });
@@ -99,7 +113,7 @@ export function Chat() {
   function verify() {
     if (!active || busy) return;
     if (failed?.targetId === active.id) { void run(failed); return; }
-    void run({ targetId: active.id, question: active.question, evidenceToken: active.evidenceToken,
+    void run({ targetId: active.id, verifySources: true, question: active.question, evidenceToken: active.evidenceToken,
       messages: [...active.messages, { role: "user", content: "Verify the sources and correct unsupported claims in this answer." }] });
   }
   function stop() { abortRef.current?.abort(); setStatus("Request stopped. Your existing result is unchanged."); }

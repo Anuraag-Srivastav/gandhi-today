@@ -38,8 +38,12 @@ for (const n of selected) {
       console.log(JSON.stringify({ sequence: n, question, answer, result, completed, failure, elapsedMs: Date.now() - started, metadata,
         size: answerSize(answer), malformedCitation: /【|\[Source\s*\[/.test(answer), semanticScore: "manual-review-required" }));
       if (!completed) break;
-      if (events.some(e => e.type === "source-check")) messages.splice(-2, 2);
-      messages.push({ role: "assistant", content: resultContext(result) });
+      const sourceCheck = events.find(e => e.type === "source-check");
+      if (sourceCheck) {
+        if (messages[sourceCheck.targetIndex]?.role !== "assistant") throw new Error("Invalid source target returned by API");
+        messages.pop();
+        messages[sourceCheck.targetIndex] = { role: "assistant", content: resultContext(result) };
+      } else messages.push({ role: "assistant", content: resultContext(result) });
     } catch (error) {
       console.log(JSON.stringify({ sequence: n, question, completed: false, failure: error instanceof Error ? error.message : "Unknown failure", elapsedMs: Date.now() - started }));
       break;

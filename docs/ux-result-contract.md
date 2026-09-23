@@ -16,6 +16,16 @@ The Check sources button sends a private verification request with the selected 
 
 Each inquiry retains its own existing signed receipt in local component state. This does not add a database or retrieval store; vector-database integration is deferred.
 
+## Context routing and quality gate (v26 candidate)
+
+Every typed turn is semantically classified, including source requests. The router returns the resolved question and, for verification/reassessment, a validated assistant-message index. Source vocabulary alone does not initiate a search. Ambiguous targets request clarification; new explicit searches have no prior-answer target. The Check sources button pins the selected inquiry directly. Definitions and topic changes do not inherit source-only restrictions.
+
+The source-check event identifies the target index. The client updates that inquiry and propagates the correction into existing descendant histories without deleting intervening turns. Reassessment answers remain separate answers to the challenge. Signed receipts are reused only when their original question binding matches; otherwise retrieval runs again. Irrelevant receipts are cleared before generation. No new evidence-storage system is introduced.
+
+After schema validation, substantive candidates receive a bounded semantic review against the question and inspected passages. It checks unsupported attributions, invented approval conditions, misrepresented restrictions and topic drift. Material issues enter the existing one-repair budget. Definitions, clarifications and scope boundaries skip this extra call. This is a fallible model review, not proof of truth; it adds latency and must pass live regression testing before production promotion. A corrected draft still needs human evaluation in the regression batch.
+
+The complete live suite includes 22 sequences, including unfamiliar questions and earlier-answer source targets. Controlled browser tests separately check older-answer correction, later-history preservation and existing responsive interactions. Candidate scores remain unassigned until actual model outputs have been reviewed; mocked passes are not semantic scores.
+
 ## Diagnostics
 
 Public UI has no model selector, question-test dropdown, prompt hash, tool counts or Test details. Production metadata contains only signed transport receipts. Detailed diagnostics remain in server logs and development responses. Model comparison requests are rejected in production and the comparison script is restricted to localhost.

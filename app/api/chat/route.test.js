@@ -3,18 +3,21 @@ import { afterEach, expect, mock, spyOn, test } from "bun:test";
 const initial = { answerType: "interpretation", shortAnswer: "A tentative application.", historicalBasis: [], interpretationBoundary: "This is an interpretation, not recorded speech.", contestedReadings: [], missingEvidence: "", suggestedFollowUps: [], verificationSummary: "" };
 const calls = [];
 let planKind = "interpretation", invalidPlan = false, toolResults = true, searchFails = false, hangSearch = false;
+let planTarget = null;
+let issues = [];
 let draft = JSON.stringify(initial), revision = JSON.stringify(initial), finishReason = "stop", revisionFinishReason = "stop";
 const create = mock(async (params, options) => {
   calls.push(params);
   if (params.response_format?.type === "json_object") {
     const question = JSON.parse(params.messages.at(-1).content).conversation.at(-1).content;
-    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind: planKind, question }) } }] };
+    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind: planKind, question, targetIndex: planTarget }) } }] };
   }
   if (params.tools) {
     if (hangSearch) return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
     if (searchFails) throw new Error("Provider unavailable");
     return { choices: [{ message: { content: "MODEL SUMMARY MUST NOT BECOME EVIDENCE", executed_tools: toolResults ? [{ type: "browser_search", arguments: "{}", index: 0, browser_results: [{ title: "Primary document", url: "https://example.org/document", content: "Source passage with an important qualification." }] }] : [] } }] };
   }
+  if (params.response_format?.json_schema?.name === "gandhi_answer_review") return { choices: [{ message: { content: JSON.stringify({ issues }) }, finish_reason: "stop" }] };
   const repair = JSON.parse(params.messages.at(-1).content).Draft !== undefined;
   return { choices: [{ message: { content: repair ? revision : draft }, finish_reason: repair ? revisionFinishReason : finishReason }] };
 });
@@ -23,6 +26,8 @@ const { POST } = await import("./route");
 const original = { key: process.env.GROQ_API_KEY, model: process.env.GROQ_MODEL, node: process.env.NODE_ENV };
 afterEach(() => {
   calls.length = 0; planKind = "interpretation"; invalidPlan = false; toolResults = true; searchFails = hangSearch = false;
+  planTarget = null;
+  issues = [];
   draft = revision = JSON.stringify(initial); finishReason = revisionFinishReason = "stop";
   for (const [key, value] of Object.entries({ GROQ_API_KEY: original.key, GROQ_MODEL: original.model, NODE_ENV: original.node })) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
 });
@@ -34,7 +39,7 @@ async function ask(question, extra = {}) {
   const response = await request({ messages: [{ role: "user", content: question }], ...extra });
   return (await response.text()).trim().split("\n").map(JSON.parse);
 }
-const answers = () => calls.filter(c => c.response_format?.type === "json_schema");
+const answers = () => calls.filter(c => c.response_format?.json_schema?.name === "gandhi_inquiry");
 const searches = () => calls.filter(c => c.tools);
 test("ordinary response is one validated structured result with no text transcript", async () => {
   const events = await ask("Explain a principle");
@@ -87,12 +92,14 @@ test("fabricated source identifier triggers repair, not a fabricated link", asyn
   expect(events.find(e => e.type === "result").result.sources).toEqual([]);
 });
 test("source deadline aborts work with no successful result", async () => {
+  planKind = "verification";
   const native = globalThis.setTimeout;
   const timer = spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => native(fn, ms > 40000 ? 2 : ms, ...args));
   hangSearch = true;
   try { const events = await ask("Source please"); expect(events.at(-1).text).toContain("time limit"); expect(answers()).toHaveLength(0); } finally { timer.mockRestore(); }
 });
 test("failed source check retains signed evidence and retries without another search", async () => {
+  planKind = "verification";
   draft = revision = "invalid";
   const events = await ask("Verify the source");
   const saved = events.find(e => e.retryToken);
@@ -123,10 +130,12 @@ test("source check targets latest question and signals in-place replacement", as
 test("source follow-up reuses the same question's evidence", async () => {
   planKind = "historical"; const first = await ask("A historical question"); const saved = first.find(e => e.evidenceToken);
   calls.length = 0;
+  planKind = "verification"; planTarget = 1;
   const response = await request({ messages: [{ role: "user", content: "A historical question" }, { role: "assistant", content: JSON.stringify(initial) }, { role: "user", content: "Source please" }], evidenceToken: saved.evidenceToken });
   await response.text(); expect(searches()).toHaveLength(0); expect(answers()).toHaveLength(1);
 });
 test("a new historical topic does not inherit verification restrictions", async () => {
+  planKind = "verification";
   const first = await ask("Source please"); planKind = "historical"; calls.length = 0;
   await ask("A different historical question", { evidenceToken: first.find(e => e.evidenceToken).evidenceToken });
   expect(searches()).toHaveLength(1); expect(answers()[0].messages[0].content).toContain("Answer the historical question");
@@ -146,7 +155,43 @@ test("failed historical retrieval does not fall back to an unsupported answer", 
   planKind = "historical"; searchFails = true; await ask("A historical question"); expect(answers()).toHaveLength(0);
 });
 test("no tool results means an empty catalog, not research-model prose", async () => {
-  toolResults = false; await ask("Source please"); expect(JSON.parse(answers()[0].messages.at(-1).content).Evidence).toEqual([]);
+  planKind = "verification"; toolResults = false; await ask("Source please"); expect(JSON.parse(answers()[0].messages.at(-1).content).Evidence).toEqual([]);
+});
+test("semantic review can trigger one correction even when the schema is valid", async () => {
+  issues = ["The candidate invents a necessary approval condition not established by evidence."];
+  revision = JSON.stringify({ ...initial, shortAnswer: "A narrower tentative interpretation." });
+  const events = await ask("A personal choice");
+  expect(answers()).toHaveLength(2);
+  expect(JSON.parse(answers()[1].messages.at(-1).content).issue).toContain("approval condition");
+  expect(events.find(e => e.type === "result").result.shortAnswer).toBe("A narrower tentative interpretation.");
+});
+test("typed source requests resolve an earlier answer rather than latest", async () => {
+  planKind = "verification"; planTarget = 1;
+  const messages = [{role:"user",content:"First topic"},{role:"assistant",content:"First answer"},{role:"user",content:"Second topic"},{role:"assistant",content:"Second answer"},{role:"user",content:"Check the first answer"}];
+  const response = await request({ messages });
+  const events = (await response.text()).trim().split("\n").map(JSON.parse);
+  expect(events.find(e => e.type === "source-check").targetIndex).toBe(1);
+  expect(JSON.parse(searches()[0].messages.at(-1).content).verificationTarget).toEqual({question:"First topic",answer:"First answer"});
+});
+test("source words in an ordinary definition do not bypass semantic routing", async () => {
+  planKind = "definition";
+  const events = await ask("What does evidence mean?");
+  expect(searches()).toHaveLength(0);
+  expect(events.some(e => e.type === "source-check")).toBe(false);
+});
+test("an ambiguous source target requests clarification without searching", async () => {
+  planKind = "clarification";
+  await ask("Can you verify that quote?");
+  expect(searches()).toHaveLength(0);
+  expect(answers()[0].messages[0].content).toContain("Ask briefly");
+});
+test("reassessment selects older context without replacing its result", async () => {
+  planKind = "reassessment"; planTarget = 1;
+  const response = await request({messages:[{role:"user",content:"First topic"},{role:"assistant",content:"First answer"},{role:"user",content:"Why did you assume that?"}]});
+  const events = (await response.text()).trim().split("\n").map(JSON.parse);
+  expect(searches()).toHaveLength(0);
+  expect(events.some(e => e.type === "source-check")).toBe(false);
+  expect(JSON.parse(answers()[0].messages.at(-1).content).verificationTarget.answer).toBe("First answer");
 });
 test("tampered evidence rejected before any provider call", async () => {
   const response = await request({ messages: [{ role: "user", content: "A question" }], evidenceToken: "tampered.token" }); expect(response.status).toBe(400); expect(calls).toHaveLength(0);

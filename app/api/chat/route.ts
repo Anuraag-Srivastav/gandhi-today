@@ -1,7 +1,7 @@
 import Groq from "groq-sdk";
 import { createHash } from "node:crypto";
 import { getPromptRules } from "@/lib/prompt";
-import { isSourceProbe, PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
+import { PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
 import { bindEvidenceQuestion, canUseRetainedEvidence, openEvidence, sealEvidence } from "@/lib/evidence";
 import { selectSourceEvidence } from "@/lib/source-excerpts";
 import { answerSize } from "@/lib/answer-limits";
@@ -11,6 +11,7 @@ import { answerMode, turnInstruction } from "@/lib/answer-mode";
 import { needsEvidence, parseAnswerPlan, planRequest, type AnswerKind } from "@/lib/answer-plan";
 import { COMPARISON_MODELS, comparisonReceipt, digest, openComparison } from "@/lib/model-comparison";
 import { evidenceCatalog, parseResult, RESULT_INSTRUCTIONS, resultFormat, ResultValidationError } from "@/lib/structured-answer";
+import { REVIEW_INSTRUCTIONS, reviewFormat, reviewIssues } from "@/lib/answer-review";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -35,16 +36,19 @@ export async function POST(request: Request) {
     if (body.verifySources !== undefined && typeof body.verifySources !== "boolean") {
       throw new Error("verifySources must be a boolean.");
     }
+    if (body.verificationTargetIndex !== undefined && (body.verifySources !== true
+      || !Number.isInteger(body.verificationTargetIndex) || body.verificationTargetIndex < 0
+      || messages[body.verificationTargetIndex]?.role !== "assistant")) throw new Error("Invalid source-check target.");
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Invalid request." }, { status: 400 });
   }
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
   const question = messages.at(-1)!.content;
-  const probe = body.verifySources === true || isSourceProbe(question);
+  let probe = body.verifySources === true;
   let mode: ReturnType<typeof answerMode> | AnswerKind = answerMode(question, probe);
   let resolvedQuestion = question;
   let sourceRequired = probe;
-  const retryIdentity = createHash("sha256").update(JSON.stringify({ messages, probe })).digest("hex");
+  const retryIdentity = createHash("sha256").update(JSON.stringify({ messages, explicitCheck: body.verifySources === true, target: body.verificationTargetIndex ?? null })).digest("hex");
   const referenceHash = createHash("sha256").update(reference).digest("hex");
   let reuseEvidence = false;
   try {
@@ -53,12 +57,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid or expired retry context. Send a new source request." }, { status: 400 });
   }
   let reasoningEffort: "low" | "medium" = probe ? "medium" : body.reasoningEffort || "low";
-  const targetIndex = messages.findLastIndex((message) => message.role === "assistant");
-  const verificationTarget = probe && targetIndex >= 0 ? {
+  let targetIndex: number | null = probe ? body.verificationTargetIndex ?? messages.findLastIndex((message) => message.role === "assistant") : null;
+  let verificationTarget = probe && targetIndex !== null && targetIndex >= 0 ? {
     question: messages.slice(0, targetIndex).findLast((message) => message.role === "user")?.content,
     answer: messages[targetIndex].content,
   } : null;
-  const retainedEvidence = probe && !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
+  let retainedEvidence = probe && !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
   if (retainedEvidence) reuseEvidence = true;
   if (probe && !supportsBrowserSearch(model)) {
     return Response.json({ error: "The configured model does not support browser search. Configure a supported GPT-OSS model to verify sources." }, { status: 400 });
@@ -111,12 +115,11 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v25-ux1" });
+        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v26-context1" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: stage === "Source search" ? "Still checking source passages…" : "Still preparing your answer…" });
       }, 10000);
       report();
-      if (probe && verificationTarget) emit({ type: "source-check" });
       try {
         if (comparison) {
           mode = comparison.mode as typeof mode;
@@ -127,15 +130,28 @@ export async function POST(request: Request) {
         } else if (!probe) {
           arm("Question routing", 10000);
           const routing = await groq.chat.completions.create(planRequest(model, messages), { signal: abort.signal });
-          const plan = parseAnswerPlan(routing.choices[0]?.message.content || "");
+          const plan = parseAnswerPlan(routing.choices[0]?.message.content || "", messages);
           mode = plan.kind;
           resolvedQuestion = plan.question;
+          probe = plan.kind === "verification";
+          targetIndex = plan.targetIndex;
+          verificationTarget = targetIndex !== null ? {
+            question: messages.slice(0, targetIndex).findLast(message => message.role === "user")?.content,
+            answer: messages[targetIndex].content,
+          } : null;
+          // A retry receipt authenticates the request, but a rerun router must still select its evidence's subject.
+          if (reuseEvidence && !canUseRetainedEvidence(reference, verificationTarget?.question || question, "")) reuseEvidence = false;
+          retainedEvidence = !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
+          if (retainedEvidence) reuseEvidence = true;
           sourceRequired = needsEvidence(plan.kind);
           if (sourceRequired && !supportsBrowserSearch(model)) throw new Error("The configured model does not support historical source retrieval.");
           if (sourceRequired) reasoningEffort = "medium";
           searchStatus = sourceRequired ? reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
           report();
         }
+        if (probe && verificationTarget) emit({ type: "source-check", targetIndex });
+        // An old receipt is not evidence for a new topic. Reassessments may use only their target's receipt.
+        if (!reuseEvidence) reference = "";
         emit({ type: "status", text: sourceRequired && reuseEvidence ? "Using the retrieved evidence…" : sourceRequired ? "Checking sources…" : "Preparing an answer…" });
         if (sourceRequired && !reuseEvidence) {
           arm("Source search", 45000);
@@ -157,7 +173,7 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = sourceRequired && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v25-ux1" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v26-context1" };
         const comparisonToken = comparisonReceipt({ mode, sourceRequired, searchStatus, reasoningEffort }, retryIdentity, reference, promptHash, apiKey);
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken, comparisonToken });
@@ -166,9 +182,8 @@ export async function POST(request: Request) {
         const catalog = evidenceCatalog(reference);
         const answerMessages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
             { role: "developer", content: rules + "\n\n" + turnInstruction(mode) + "\n\nRuntime: search is unavailable during answer generation. Source check status: " + searchStatus + ". Retained evidence may concern an older topic; use only relevant passages. Its presence does not make ordinary definitions source-only tasks. The Evidence catalog supplies inspected source text and identifiers for historicalBasis. Prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
-            ...messages.slice(0, -1),
             { role: "user", content: JSON.stringify({ Question: question, Evidence: catalog, originalQuestion: verificationTarget?.question || question,
-              verificationTarget, task: probe ? "Update the original inquiry result with checked evidence and corrections. Preserve necessary qualifications and put corrections in verificationSummary. Answer the original question, not the source-check instruction. Do not add historical claims to rescue an unsupported conclusion." : "Produce the structured inquiry result." }) },
+              conversationForContextOnly: messages.slice(0, -1), verificationTarget, resolvedQuestion, task: probe && verificationTarget ? "Update the original inquiry result with checked evidence and corrections. Preserve necessary qualifications and put corrections in verificationSummary. Answer the original question, not the source-check instruction. Do not add historical claims to rescue an unsupported conclusion." : "Produce the structured inquiry result for the current resolved question. A reassessment target is context, not a request to replace that earlier answer." }) },
           ];
         answerMessages[0].content += "\n\n" + RESULT_INSTRUCTIONS;
         const generate = (repair?: { draft: string; issue: string }) => groq.chat.completions.create({
@@ -186,7 +201,22 @@ export async function POST(request: Request) {
         try {
           if (generated.choices[0]?.finish_reason !== "stop") throw new ResultValidationError("The provider did not finish the result.");
           result = parseResult(raw, catalog);
+          if (!["definition", "clarification", "unrelated"].includes(mode)) {
+            arm("Answer review", 15000);
+            const review = await groq.chat.completions.create({
+              model: answerModel, temperature: 0, max_tokens: 1600, ...reasoning("low"), stream: false,
+              response_format: reviewFormat,
+              messages: [{ role: "developer", content: REVIEW_INSTRUCTIONS }, { role: "user", content: JSON.stringify({
+                question: probe && verificationTarget ? verificationTarget.question : resolvedQuestion,
+                mode, target: verificationTarget, Evidence: catalog, candidate: JSON.parse(raw),
+              }) }],
+            }, { signal: abort.signal });
+            if (review.choices[0]?.finish_reason !== "stop") throw new Error("Answer review did not finish.");
+            const issues = reviewIssues(review.choices[0]?.message.content || "");
+            if (issues.length) throw new ResultValidationError(issues.join("\n"));
+          }
         } catch (error) {
+          if (!(error instanceof ResultValidationError)) throw error;
           rewritten = true;
           emit({ type: "status", text: "Checking the answer’s structure and source passages…" });
           arm("Answer refinement", 20000);
