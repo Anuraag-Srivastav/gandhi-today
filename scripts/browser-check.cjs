@@ -34,6 +34,7 @@ const sourced = { ...sample, historicalBasis: [{ claim: 'A documented point with
       await page.goto(base);
       const input = page.getByRole('textbox', { name: 'Your question', exact: true });
       await input.waitFor();
+      assert.equal(await page.locator('.quiz-promo').count(), 0, 'quiz promotion is not on the homepage');
       assert.equal(await input.count(), 1);
       const composer = await input.boundingBox();
       assert(composer.y + composer.height < 900, 'composer above fold');
