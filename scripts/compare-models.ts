@@ -4,7 +4,9 @@
  * Inputs only: no reference answers or topic-specific production instructions.
  */
 import { sequences } from "./evaluation-cases";
-import { COMPARISON_MODEL } from "../lib/model-comparison";
+import { COMPARISON_MODELS } from "../lib/model-comparison";
+const candidateModel = process.argv[4] || "qwen/qwen3.8-27b";
+if (!COMPARISON_MODELS.includes(candidateModel)) throw new Error("Unsupported candidate");
 const base = process.argv[2];
 if (!base || !/^https:\/\//.test(base)) throw new Error("Supply HTTPS app URL.");
 const selected = process.argv[3]?.split(",").map(Number) || sequences.map((_, i) => i + 1);
@@ -30,7 +32,7 @@ for (const sequence of selected) {
         break;
       }
       evidenceToken = baseline.evidenceToken || "";
-      const candidate = await ask({ messages, evidenceToken, comparisonToken: baseline.comparisonToken, answerModel: COMPARISON_MODEL });
+      const candidate = await ask({ messages, evidenceToken, comparisonToken: baseline.comparisonToken, answerModel: candidateModel });
       const paired = baseline.result.metadata.evidenceHash === candidate.result.metadata.evidenceHash && baseline.result.metadata.promptHash === candidate.result.metadata.promptHash;
       console.log(JSON.stringify({ sequence, question, paired, baseline: baseline.result, candidate: candidate.result }));
       if (!candidate.result.completed) break;

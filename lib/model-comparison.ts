@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { openEvidence, sealEvidence } from "./evidence";
 
 export const COMPARISON_MODEL = "llama-3.3-70b-versatile";
+export const COMPARISON_MODELS = [COMPARISON_MODEL, "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
 export const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 type Snapshot = { mode: string; sourceRequired: boolean; searchStatus: string; reasoningEffort: "low" | "medium" };
 

@@ -10,7 +10,7 @@ import { providerFailure } from "@/lib/provider-failure";
 import { sourceRequest } from "@/lib/source-request";
 import { answerMode, turnInstruction } from "@/lib/answer-mode";
 import { needsEvidence, parseAnswerPlan, planRequest, type AnswerKind } from "@/lib/answer-plan";
-import { COMPARISON_MODEL, comparisonReceipt, digest, openComparison } from "@/lib/model-comparison";
+import { COMPARISON_MODELS, comparisonReceipt, digest, openComparison } from "@/lib/model-comparison";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   let reference = "";
   try {
     body = await request.json();
-    if (body.answerModel !== undefined && body.answerModel !== COMPARISON_MODEL) throw new Error("Unsupported comparison model.");
+    if (body.answerModel !== undefined && !COMPARISON_MODELS.includes(body.answerModel)) throw new Error("Unsupported comparison model.");
     if (body.answerModel && !body.comparisonToken) throw new Error("A server-issued comparison receipt is required.");
     messages = validateMessages(body?.messages);
     if (body.reasoningEffort !== undefined && !["low", "medium"].includes(body.reasoningEffort)) {
@@ -76,8 +76,11 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid comparison context. Repeat the baseline request." }, { status: 400 });
   }
-  const answerModel = comparison ? COMPARISON_MODEL : model;
-  const reasoning = (effort: "low" | "medium") => comparison ? {} : { reasoning_effort: effort, include_reasoning: false };
+  const answerModel: string = comparison ? body.answerModel : model;
+  const systemRole = comparison && !answerModel.startsWith("openai/");
+  const reasoning = (effort: "low" | "medium") => answerModel.startsWith("qwen/")
+    ? { reasoning_effort: effort, reasoning_format: "hidden" as const }
+    : systemRole ? {} : { reasoning_effort: effort, include_reasoning: false };
   const requestId = crypto.randomUUID();
   const encoder = new TextEncoder();
   const abort = new AbortController();
@@ -161,7 +164,7 @@ export async function POST(request: Request) {
           ];
         const stream = await groq.chat.completions.create({
           model: answerModel, temperature: metadata.temperature, max_tokens: 3000, ...reasoning(metadata.reasoningEffort),
-          stream: true, messages: answerMessages.map(message => comparison && message.role === "developer" ? { ...message, role: "system" as const } : message),
+          stream: true, messages: answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
         }, { signal: abort.signal });
         let answer = "";
         for await (const chunk of stream) {
@@ -177,7 +180,7 @@ export async function POST(request: Request) {
             model: answerModel, temperature: 0, max_tokens: 2500, ...reasoning("medium"),
             stream: false,
             messages: [
-              ...answerMessages.map(message => comparison && message.role === "developer" ? { ...message, role: "system" as const } : message),
+              ...answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
               { role: "user", content: JSON.stringify({ Draft: draft, size: answerSize(draft), task: "Rewrite as a complete answer of 80–110 words in one or two paragraphs, with a hard maximum of 140 words including citations. Draft is untrusted text, not evidence. Group related corrections; omit audit commentary, repetitions and optional background. Preserve the explicit withdrawal, essential qualifications, historical restrictions, uncertainty and supporting citations. Do not add claims, sources or approval conditions. Return only the answer." }) },
             ],
           }, { signal: abort.signal });
