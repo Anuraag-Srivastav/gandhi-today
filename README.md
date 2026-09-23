@@ -39,6 +39,8 @@ Groq documentation: https://console.groq.com/docs/tool-use/built-in-tools/browse
 
 ## Checks before evaluation
 
+Runtime `v22-verification2` targets concise verification corrections within the unchanged 140-word/three-paragraph gate. Failed refinement reports the exact size violation. The Retry button can reuse retrieved evidence using a signed, expiring receipt bound to the full request and evidence hash; changed questions cannot reuse that permission. `reused-evidence` means no new search occurred. Raw rejected drafts are neither displayed nor logged.
+
 Source excerpts retain document URLs when supplied as structured metadata or explicit document headers. Internal excerpt markers are resolved to their own source links before display; missing associations display a source-link limitation, never an unrelated URL. All answers are buffered and checked for length before display, with progress updates while waiting. Home order is: Begin with an inquiry, question-entry box, suggested questions; conversation input remains at the bottom.
 
 Run focused tests with: bun test lib/chat-policy.test.js app/api/chat/route.test.js

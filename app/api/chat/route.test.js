@@ -68,6 +68,29 @@ test("failed rewrite emits no partial answer and makes no further attempts", asy
   expect(events.at(-1).text).toContain("response limit");
 });
 
+test("failed verification retains bound evidence for retry without another search", async () => {
+  draft = revision = Array(141).fill("word").join(" ");
+  const events = await ask("Please verify the source");
+  const saved = events.find(e => e.retryToken);
+  expect(saved.evidenceToken).toBeTruthy();
+  expect(events.find(e => e.validation).validation).toEqual({ reason: "words", words: 141, paragraphs: 1 });
+  calls.length = 0;
+  draft = "A corrected answer.";
+  const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    messages: [{ role: "user", content: "Please verify the source" }], evidenceToken: saved.evidenceToken, retryToken: saved.retryToken,
+  }) }));
+  const output = await response.text();
+  expect(calls).toHaveLength(1);
+  expect(calls[0].tools).toBeUndefined();
+  expect(output).toContain("reused-evidence");
+  calls.length = 0;
+  const changed = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    messages: [{ role: "user", content: "Verify a different claim" }], evidenceToken: saved.evidenceToken, retryToken: saved.retryToken,
+  }) }));
+  await changed.text();
+  expect(calls[0].tools).toBeDefined();
+});
+
 test("probe rewrite retains target and evidence without a second search", async () => {
   draft = Array(141).fill("word").join(" ");
   revision = "A qualified interpretation. [Source](https://example.org/document)";

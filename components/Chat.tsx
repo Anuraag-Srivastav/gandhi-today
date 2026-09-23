@@ -68,6 +68,7 @@ export function Chat() {
   const [diagnostic, setDiagnostic] = useState("");
   const [failedRequest, setFailedRequest] = useState<{ content: string; verifySources: boolean } | null>(null);
   const evidenceRef = useRef("");
+  const retryTokenRef = useRef("");
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -120,7 +121,7 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources }),
+        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources, retryToken: retry ? retryTokenRef.current : undefined }),
         signal: controller.signal,
       });
 
@@ -150,6 +151,11 @@ export function Chat() {
         if (event.type === "status") setProgress(event.text);
         if (event.type === "metadata") {
           if (typeof event.evidenceToken === "string") evidenceRef.current = event.evidenceToken;
+          if (typeof event.retryToken === "string") retryTokenRef.current = event.retryToken;
+          if (event.validation) {
+            setDiagnostic(previous => previous + ` · validation: ${event.validation.reason} · words: ${event.validation.words}/140 · paragraphs: ${event.validation.paragraphs}/3`);
+            return;
+          }
           setDiagnostic([event.promptVersion, event.promptHash, event.model, event.experiment, event.reasoningEffort && "reasoning: " + event.reasoningEffort, "search: " + event.searchStatus, "tools: " + event.toolsExecuted, event.stage, event.failureCode && "failure: " + event.failureCode, event.providerStatus && "provider HTTP: " + event.providerStatus, typeof event.elapsedMs === "number" && "elapsed: " + Math.round(event.elapsedMs / 1000) + "s", "request: " + event.requestId].filter(Boolean).join(" · "));
         }
         if (event.type === "error") throw new Error(event.text);
@@ -210,6 +216,7 @@ export function Chat() {
     abortRef.current?.abort();
     abortRef.current = null;
     evidenceRef.current = "";
+    retryTokenRef.current = "";
     setDiagnostic("");
     setFailedRequest(null);
     setMessages([]);

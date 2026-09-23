@@ -20,7 +20,7 @@ const assert = require('node:assert/strict');
       await page.route('**/api/chat', async route => {
         requests.push(route.request().postDataJSON());
         const events = [
-          { type: 'metadata', promptVersion: 'v18', promptHash: 'test', model: 'mock', searchStatus: failure ? 'search-failed' : 'results-returned', toolsExecuted: 1, requestId: 'browser-test', evidenceToken: 'signed-test-token' },
+          { type: 'metadata', promptVersion: 'v22', promptHash: 'test', model: 'mock', searchStatus: failure ? 'answer-failed' : 'results-returned', toolsExecuted: 1, requestId: 'browser-test', evidenceToken: 'signed-test-token', retryToken: 'signed-retry-token' },
           ...(failure ? [{ type: 'error', text: 'Source service unavailable. Please retry.' }] : [
             { type: 'text', text: 'A cautious interpretation. [Source](https://example.org/gandhi). See https://example.org/reading.' },
             ...(interrupted ? [] : [{ type: 'done' }]),
@@ -59,12 +59,13 @@ const assert = require('node:assert/strict');
       await input.press('Enter');
       await page.getByRole('alert').filter({ hasText: 'Source service unavailable' }).waitFor();
       await page.getByText('Test details', { exact: true }).click();
-      assert((await page.locator('details').filter({ has: page.getByText('Test details', { exact: true }) }).innerText()).includes('search-failed'));
+      assert((await page.locator('details').filter({ has: page.getByText('Test details', { exact: true }) }).innerText()).includes('answer-failed'));
       failure = false;
       const failedMessages = requests.at(-1).messages;
       await page.getByRole('button', { name: 'Retry request' }).click();
       await page.getByRole('button', { name: 'Verify sources' }).waitFor();
       assert.deepEqual(requests.at(-1).messages, failedMessages, 'retry does not duplicate the user turn');
+      assert.equal(requests.at(-1).retryToken, 'signed-retry-token', 'retry retains receipt after failure');
       interrupted = true;
       await input.fill('Try again');
       await input.press('Enter');
@@ -76,6 +77,7 @@ const assert = require('node:assert/strict');
       await page.getByRole('button', { name: 'Verify sources' }).waitFor();
       assert.equal(requests.at(-1).messages.length, 1);
       assert.equal(requests.at(-1).evidenceToken, '');
+      assert.equal(requests.at(-1).retryToken, undefined, 'new inquiry cannot reuse a receipt');
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no page overflow');
       assert.deepEqual(errors, []);
       await page.screenshot({ path: `/tmp/gandhi-chat-${width}.png`, fullPage: true });

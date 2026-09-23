@@ -6,9 +6,12 @@ export function answerSize(text: string) {
 }
 
 export class AnswerLimitError extends Error {
-  constructor() {
+  readonly validation;
+  constructor(text: string) {
     super("The answer could not be completed within the response limit. Please retry; no partial answer was saved.");
     this.name = "AnswerLimitError";
+    const size = answerSize(text);
+    this.validation = { ...size, reason: !size.words ? "empty" : size.words > 140 ? "words" : "paragraphs" };
   }
 }
 
@@ -20,6 +23,6 @@ export async function enforceAnswerLimits(text: string, rewrite: (draft: string)
   };
   if (valid(text)) return { text: text.trim(), rewritten: false };
   const revised = await rewrite(text);
-  if (!valid(revised)) throw new AnswerLimitError();
+  if (!valid(revised)) throw new AnswerLimitError(revised);
   return { text: revised.trim(), rewritten: true };
 }
