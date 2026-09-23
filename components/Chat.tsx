@@ -279,7 +279,7 @@ export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
                 onChange={(event) => { setInput(event.target.value); setError(null); }}
                 onKeyDown={onKeyDown}
                 rows={1}
-                placeholder="Ask about his views, his life, or a question you're facing…"
+                placeholder="Ask about Gandhi’s views, apply to the situation you face..."
                 className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-[15px] text-ink outline-none placeholder:text-ink-soft/80"
               />
               {isLoading ? (
