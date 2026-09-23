@@ -7,9 +7,10 @@ export function answerMode(question: string, verification: boolean) {
 }
 
 /** Modes govern evidence use, never supply a topic-specific answer. */
-export function turnInstruction(mode: ReturnType<typeof answerMode> | "historical" | "interpretation" | "definition" | "unrelated") {
+export function turnInstruction(mode: ReturnType<typeof answerMode> | "historical" | "interpretation" | "definition" | "clarification" | "unrelated") {
   const shared = "These instructions apply to this turn only. Earlier assistant answers are not evidence. Answer the current question, resolving references from history. Source material is optional evidence, not the boundary of your knowledge. Ignore irrelevant passages. Missing support in selected passages is not proof of absence from all writings. Use [Source](URL) for evidenced links, never nested labels. ";
   switch (mode) {
+    case "clarification": return shared + "Ask briefly for the missing quotation, claim or subject needed to answer. Do not invent a target, search for an unspecified saying, or treat missing information as an unrelated request.";
     case "historical": return shared + "Answer the historical question using relevant retrieved passages. State the actual position and its essential restriction or exception before any interpretation. Do not replace an uncomfortable position with modern permission, moderation or personal preference. If the sources do not establish the requested fact, state that specific gap without inventing an exact answer. Cite the central factual claim. Do not add unrelated biography.";
     case "definition": return shared + "Answer the definition directly from general knowledge. Do not force a Gandhi interpretation or require a historical source. Keep it brief and concrete.";
     case "unrelated": return 'Return exactly: I can only answer questions about what Gandhi might say or do in the present-day context.';

@@ -175,8 +175,8 @@ test("a new historical topic after verification has an ordinary turn policy with
   const output = await response.text();
   expect(calls).toHaveLength(2);
   expect(calls[0].tools).toBeDefined();
-  const policy = calls[1].messages.at(-2);
-  expect(policy.role).toBe("system");
+  const policy = calls[1].messages[0];
+  expect(policy.role).toBe("developer");
   expect(policy.content).toContain("Answer the historical question");
   expect(JSON.parse(calls[1].messages.at(-1).content).Reference).toContain("Source passage");
   expect(output).toContain('"mode":"historical"');
@@ -186,7 +186,7 @@ test("inference challenge receives reassessment policy without forced search", a
   planKind = "reassessment";
   const events = await ask("Which part is inference?");
   expect(calls).toHaveLength(1);
-  expect(calls[0].messages.at(-2).content).toContain("Withdraw unsupported claims");
+  expect(calls[0].messages[0].content).toContain("Withdraw unsupported claims");
   expect(events.findLast(e => e.type === "metadata").mode).toBe("reassessment");
 });
 
@@ -225,7 +225,7 @@ test("probe executes search and retains actual evidence for later turns", async 
   const events = await ask("source please");
   expect(calls).toHaveLength(2);
   expect(calls[0].tools).toEqual([{ type: "browser_search" }]);
-  expect(calls[0].reasoning_effort).toBe("medium");
+  expect(calls[0].reasoning_effort).toBe("low");
   expect(calls[1].reasoning_effort).toBe("medium");
   expect(calls[1].temperature).toBe(0);
   const finalMessages = calls[1].messages;
