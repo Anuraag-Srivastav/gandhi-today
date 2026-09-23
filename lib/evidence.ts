@@ -1,7 +1,25 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 const MAX_EVIDENCE = 32000;
 const MAX_AGE = 24 * 60 * 60 * 1000;
+
+/** Bind retrieved passages to the exact question, not a model's later prose. */
+export function bindEvidenceQuestion(reference: string, question: string) {
+  return JSON.stringify({ ...JSON.parse(reference), questionHash: createHash("sha256").update(question).digest("hex") });
+}
+
+/** Reuse inspected passages for a source follow-up on that same answered question.
+ * This establishes provenance, not entailment; the answering model must still
+ * correct claims unsupported by the passages. Explicit fresh searches bypass it.
+ */
+export function canUseRetainedEvidence(reference: string, targetQuestion: string | undefined, request: string) {
+  if (!reference || !targetQuestion || /\b(search|browse|look up|find online|latest|current|today)\b/i.test(request)) return false;
+  try {
+    const value = JSON.parse(reference);
+    return value.questionHash === createHash("sha256").update(targetQuestion).digest("hex")
+      && Array.isArray(value.excerpts) && value.excerpts.some((e: { text?: string; sourceUrl?: string }) => e.text && e.sourceUrl);
+  } catch { return false; }
+}
 
 /** Signed transport prevents browser-supplied text masquerading as retrieved evidence. */
 export function sealEvidence(text: string, secret: string, now = Date.now()) {

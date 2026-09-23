@@ -164,6 +164,20 @@ test("historical generation failure can reuse evidence on the identical retry", 
   expect(calls[0].tools).toBeUndefined();
 });
 
+test("source follow-up reuses question-bound evidence, not research-model prose", async () => {
+  planKind = "historical";
+  const first = await ask("A historical question");
+  const token = first.find(e => e.evidenceToken).evidenceToken;
+  calls.length = 0;
+  const response = await POST(new Request("http://localhost/api/chat", {method:"POST",body:JSON.stringify({
+    messages:[{role:"user",content:"A historical question"},{role:"assistant",content:"A potentially overconfident answer"},{role:"user",content:"Source please"}], evidenceToken:token,
+  })}));
+  expect(await response.text()).toContain("retained-evidence");
+  expect(calls).toHaveLength(1);
+  expect(calls[0].tools).toBeUndefined();
+  expect(calls[0].messages[0].content).toContain("Withdraw unsupported factual attribution");
+});
+
 test("a new historical topic after verification has an ordinary turn policy with retained evidence", async () => {
   const first = await ask("Please verify the source");
   const token = first.find(e => e.evidenceToken)?.evidenceToken;

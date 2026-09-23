@@ -2,7 +2,7 @@ import Groq from "groq-sdk";
 import { createHash } from "node:crypto";
 import { formatQuestion, getPromptRules } from "@/lib/prompt";
 import { isSourceProbe, PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
-import { openEvidence, sealEvidence } from "@/lib/evidence";
+import { bindEvidenceQuestion, canUseRetainedEvidence, openEvidence, sealEvidence } from "@/lib/evidence";
 import { selectSourceEvidence } from "@/lib/source-excerpts";
 import { resolveCitations } from "@/lib/citations";
 import { AnswerLimitError, answerSize, enforceAnswerLimits } from "@/lib/answer-limits";
@@ -54,6 +54,8 @@ export async function POST(request: Request) {
     question: messages.slice(0, targetIndex).findLast((message) => message.role === "user")?.content,
     answer: messages[targetIndex].content,
   } : null;
+  const retainedEvidence = probe && !reuseEvidence && canUseRetainedEvidence(reference, verificationTarget?.question, question);
+  if (retainedEvidence) reuseEvidence = true;
   if (probe && !supportsBrowserSearch(model)) {
     return Response.json({ error: "The configured model does not support browser search. Configure a supported GPT-OSS model to verify sources." }, { status: 400 });
   }
@@ -75,7 +77,7 @@ export async function POST(request: Request) {
     async start(controller) {
       const emit = (event: object) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
       let toolsExecuted = 0;
-      let searchStatus = probe ? reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
+      let searchStatus = probe ? retainedEvidence ? "retained-evidence" : reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
       let stage = probe && !reuseEvidence ? "Source search" : probe ? "Answer generation" : "Question routing";
       let timedOut = false;
       let failureCode: string | undefined;
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-harmony2" });
+        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-context3" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
@@ -109,7 +111,7 @@ export async function POST(request: Request) {
         emit({ type: "status", text: sourceRequired && reuseEvidence ? "Using the retrieved evidence…" : sourceRequired ? "Checking sources…" : "Preparing an answer…" });
         if (sourceRequired && !reuseEvidence) {
           arm("Source search", 45000);
-          const research = await groq.chat.completions.create(sourceRequest(model, resolvedQuestion, verificationTarget, probe ? "verification" : mode === "reading" ? "reading" : "historical"), { signal: abort.signal });
+          const research = await groq.chat.completions.create(sourceRequest(model, resolvedQuestion, verificationTarget, probe ? "verification" : mode === "reading" ? "reading" : "historical", messages.slice(-5, -1)), { signal: abort.signal });
           const tools = research.choices[0]?.message.executed_tools || [];
           const browserTools = tools.filter((tool) => /browser|search/i.test(tool.type));
           toolsExecuted = browserTools.length;
@@ -119,7 +121,7 @@ export async function POST(request: Request) {
             browser_results: tool.browser_results, search_results: tool.search_results,
           })).filter((tool) => tool.output || tool.browser_results?.length || tool.search_results);
           if (records.length) {
-            reference = selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget));
+            reference = bindEvidenceQuestion(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)), question);
             searchStatus = "results-returned";
           } else {
             searchStatus = toolsExecuted ? "no-results" : "no-tool-record";
@@ -127,7 +129,7 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = sourceRequired && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-harmony2" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-context3" };
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken });
         emit({ type: "status", text: "Preparing an answer…" });
