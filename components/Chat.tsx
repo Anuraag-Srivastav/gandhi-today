@@ -2,6 +2,7 @@
 
 import {
   FormEvent,
+  ReactNode,
   KeyboardEvent,
   useEffect,
   useMemo,
@@ -82,7 +83,7 @@ function Charkha({ className = "", spinning = false }: { className?: string; spi
   );
 }
 
-export function Chat() {
+export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -319,13 +320,14 @@ export function Chat() {
     <div className="khadi-grain flex min-h-dvh flex-col">
       <div className="flag-bar h-1.5 w-full" />
 
-      <header className="mx-auto flex w-full max-w-3xl items-start justify-between gap-4 px-5 py-5 sm:px-8">
+      <header className="relative isolate mx-auto flex w-full max-w-3xl items-start justify-between gap-4 overflow-hidden px-5 py-5 sm:px-8">
+        {!hasConversation && archiveTexture}
         <div className="flex items-start gap-3">
           <div className="mt-1 flex h-11 w-11 items-center justify-center rounded-full border border-saffron/30 bg-paper text-saffron">
             <Charkha className="h-7 w-7" spinning={isLoading} />
           </div>
           <div>
-            <p className="font-ui text-[11px] tracking-[0.28em] text-earth uppercase">
+            <p className={`font-ui text-[11px] tracking-[0.28em] uppercase ${archiveTexture && !hasConversation ? "text-ink-soft" : "text-earth"}`}>
               His record, and what it might mean now
             </p>
             <h1 className="font-display text-[1.85rem] leading-none font-semibold text-ink italic sm:text-[2.15rem]">
@@ -337,7 +339,10 @@ export function Chat() {
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex items-center">
         <Link href="/quiz" className="font-ui inline-flex min-h-11 items-center px-2 text-xs text-ink-soft underline underline-offset-4 hover:text-saffron-deep">Quiz</Link>
+        <Link href="/about" className="font-ui inline-flex min-h-11 items-center px-2 text-xs text-ink-soft underline underline-offset-4 hover:text-saffron-deep">About</Link>
+        </div>
         {hasConversation ? (
           <button
             type="button"
