@@ -207,6 +207,61 @@ export function Chat() {
     setInput("");
   }
 
+  const composer = (
+          <form
+            onSubmit={onSubmit}
+            className={(hasConversation ? "border-t " : "border-b ") + "border-earth/10 bg-paper/80 px-4 py-4 sm:px-6"}
+          >
+            {error ? (
+              <p className="mb-3 rounded-xl border border-saffron/30 bg-saffron/10 px-3 py-2 text-sm text-saffron-deep">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex items-end gap-2 rounded-2xl border border-earth/15 bg-khadi/60 px-3 py-2 focus-within:border-saffron/50">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={onKeyDown}
+                rows={1}
+                placeholder="Ask what Gandhi might say about a present-day issue…"
+                className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] text-ink outline-none placeholder:text-ink-soft/80"
+              />
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    abortRef.current?.abort();
+                    abortRef.current = null;
+                    setMessages((current) => current.at(-1)?.role === "assistant" ? current.slice(0, -1) : current);
+                    setIsLoading(false);
+                  }}
+                  className="font-ui mb-1 rounded-full border border-earth/20 px-3 py-2 text-xs text-earth hover:text-saffron-deep"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="mb-1 rounded-full bg-saffron px-4 py-2 text-sm text-paper transition hover:bg-saffron-deep disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Ask
+                </button>
+              )}
+            </div>
+            <p className="font-ui mt-2 text-center text-[11px] tracking-wide text-ink-soft">
+              Interpretation is distinct from verified history.
+            </p>
+            {hasConversation && !isLoading && messages.at(-1)?.role === "assistant" ? (
+              <button type="button" className="mt-2 text-sm underline" onClick={() => void send("Please verify the sources for your previous answer and correct any unsupported claims.", true)}>
+                Verify sources
+              </button>
+            ) : null}
+            {diagnostic ? <details className="mt-2 text-xs text-ink-soft"><summary>Test details</summary><p className="break-words">{diagnostic}</p></details> : null}
+          </form>
+  );
+
   return (
     <div className="khadi-grain flex min-h-dvh flex-col">
       <div className="flag-bar h-1.5 w-full" />
@@ -242,6 +297,7 @@ export function Chat() {
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pb-4 sm:px-8">
         <div className="paper-card relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-earth/10">
+          {!hasConversation ? composer : null}
           <div className="flex items-center justify-between border-b border-earth/10 px-5 py-3">
             <p className="font-ui text-[11px] tracking-[0.18em] text-earth uppercase">
               {statusLabel}
@@ -336,58 +392,7 @@ export function Chat() {
             )}
           </div>
 
-          <form
-            onSubmit={onSubmit}
-            className="border-t border-earth/10 bg-paper/80 px-4 py-4 sm:px-6"
-          >
-            {error ? (
-              <p className="mb-3 rounded-xl border border-saffron/30 bg-saffron/10 px-3 py-2 text-sm text-saffron-deep">
-                {error}
-              </p>
-            ) : null}
-            <div className="flex items-end gap-2 rounded-2xl border border-earth/15 bg-khadi/60 px-3 py-2 focus-within:border-saffron/50">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={onKeyDown}
-                rows={1}
-                placeholder="Ask what Gandhi might say about a present-day issue…"
-                className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] text-ink outline-none placeholder:text-ink-soft/80"
-              />
-              {isLoading ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    abortRef.current?.abort();
-                    abortRef.current = null;
-                    setMessages((current) => current.at(-1)?.role === "assistant" ? current.slice(0, -1) : current);
-                    setIsLoading(false);
-                  }}
-                  className="font-ui mb-1 rounded-full border border-earth/20 px-3 py-2 text-xs text-earth hover:text-saffron-deep"
-                >
-                  Stop
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!input.trim()}
-                  className="mb-1 rounded-full bg-saffron px-4 py-2 text-sm text-paper transition hover:bg-saffron-deep disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Ask
-                </button>
-              )}
-            </div>
-            <p className="font-ui mt-2 text-center text-[11px] tracking-wide text-ink-soft">
-              Interpretation is distinct from verified history.
-            </p>
-            {hasConversation && !isLoading && messages.at(-1)?.role === "assistant" ? (
-              <button type="button" className="mt-2 text-sm underline" onClick={() => void send("Please verify the sources for your previous answer and correct any unsupported claims.", true)}>
-                Verify sources
-              </button>
-            ) : null}
-            {diagnostic ? <details className="mt-2 text-xs text-ink-soft"><summary>Test details</summary><p className="break-words">{diagnostic}</p></details> : null}
-          </form>
+          {hasConversation ? composer : null}
         </div>
       </main>
     </div>
