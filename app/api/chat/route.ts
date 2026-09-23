@@ -4,6 +4,7 @@ import { formatQuestion, getPromptRules } from "@/lib/prompt";
 import { isSourceProbe, PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
 import { openEvidence, sealEvidence } from "@/lib/evidence";
 import { selectSourceEvidence } from "@/lib/source-excerpts";
+import { resolveCitations } from "@/lib/citations";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -95,17 +96,22 @@ export async function POST(request: Request) {
           model, temperature: 0.4, max_tokens: 1200, reasoning_effort: "low",
           include_reasoning: false, stream: true,
           messages: [
-            { role: "system", content: rules + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
+            { role: "system", content: rules + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Cite sourceUrl from the supporting excerpt as a clickable Markdown link. Never output record paths or tool citation markers. If an excerpt has no associated sourceUrl, give only its evidenced bibliographic details and acknowledge that its link is unavailable. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
             ...messages.slice(0, -1),
             { role: "user", content: probe ? JSON.stringify({ Question: question, Reference: reference,
               verificationTarget, task: "Check this target answer against the evidence. Cite supporting source URLs and correct unsupported claims. Do not substitute checking a different conversation topic." })
               : formatQuestion(question, reference) },
           ],
         }, { signal: abort.signal });
+        let answer = "";
         for await (const chunk of stream) {
           const text = chunk.choices[0]?.delta?.content;
-          if (text) emit({ type: "text", text });
+          if (text) {
+            if (reference) answer += text;
+            else emit({ type: "text", text });
+          }
         }
+        if (reference) emit({ type: "text", text: resolveCitations(answer, reference) });
         emit({ type: "done" });
         controller.close();
       } catch (error) {

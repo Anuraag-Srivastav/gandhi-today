@@ -298,7 +298,6 @@ export function Chat() {
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pb-4 sm:px-8">
         <div className="paper-card relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-earth/10">
-          {!hasConversation ? composer : null}
           <div className="flex items-center justify-between border-b border-earth/10 px-5 py-3">
             <p className="font-ui text-[11px] tracking-[0.18em] text-earth uppercase">
               {statusLabel}
@@ -328,6 +327,7 @@ export function Chat() {
                   <p className="font-ui mb-3 text-[11px] tracking-[0.22em] text-earth uppercase">
                     Begin with an inquiry
                   </p>
+                  {composer}
                   <div className="grid gap-2 sm:grid-cols-2">
                     {SUGGESTED_INQUIRIES.map((inquiry) => (
                       <button

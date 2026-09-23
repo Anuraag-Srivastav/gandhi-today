@@ -37,6 +37,8 @@ Groq documentation: https://console.groq.com/docs/tool-use/built-in-tools/browse
 
 ## Checks before evaluation
 
+Source excerpts retain document URLs when supplied as structured metadata or explicit document headers. Internal excerpt markers are resolved to their own source links before display; missing associations display a source-link limitation, never an unrelated URL. Source-backed final answers are buffered to resolve markers safely across streaming chunks. Ordinary answers still stream. Home order is: Begin with an inquiry, question-entry box, suggested questions; conversation input remains at the bottom.
+
 Run focused tests with: bun test lib/chat-policy.test.js app/api/chat/route.test.js
 These mock Groq and do not prove live tool availability.
 
