@@ -75,7 +75,7 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v21-source1" });
+        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v22-reading1" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
           }
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, messages: messages.length, searchStatus, toolsExecuted, experiment: "v21-source1" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, messages: messages.length, searchStatus, toolsExecuted, experiment: "v22-reading1" };
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken });
         emit({ type: "status", text: "Preparing an answer…" });

@@ -9,7 +9,6 @@ import {
   useState,
 } from "react";
 import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
-import { TEST_QUESTIONS } from "@/lib/test-questions";
 
 function renderLinks(text: string) {
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+)/g;
@@ -275,20 +274,13 @@ export function Chat() {
               </button>
             ) : null}
             {diagnostic ? <details className="mt-2 text-xs text-ink-soft"><summary>Test details</summary><p className="break-words">{diagnostic}</p></details> : null}
-            <details className="mt-3 text-sm text-ink-soft">
-              <summary>Test questions and settings</summary>
-              <p className="my-2">Start a New inquiry for each topic. Compare the same questions on Low and Medium. Source checks always use Medium.</p>
-              <label className="block" htmlFor="test-reasoning">Answer reasoning</label>
-              <select id="test-reasoning" value={reasoningEffort} disabled={hasConversation || isLoading} onChange={e => setReasoningEffort(e.target.value)} className="my-2 w-full rounded border border-earth/20 bg-paper p-2">
-                <option value="low">Low (baseline)</option><option value="medium">Medium (comparison)</option>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
+              <label htmlFor="test-reasoning">Answer reasoning</label>
+              <select id="test-reasoning" aria-describedby="reasoning-help" value={reasoningEffort} disabled={hasConversation || isLoading} onChange={e => setReasoningEffort(e.target.value)} className="w-24 rounded border border-earth/20 bg-paper px-2 py-1 text-xs">
+                <option value="low">Low</option><option value="medium">Medium</option>
               </select>
-              {hasConversation ? <p>Start a New inquiry to change reasoning.</p> : null}
-              <label className="block" htmlFor="test-question">Load a question into the input</label>
-              <select id="test-question" value="" disabled={isLoading} onChange={e => { setInput(e.target.value); setError(null); textareaRef.current?.focus(); }} className="my-2 w-full min-w-0 rounded border border-earth/20 bg-paper p-2">
-                <option value="">Choose a test question…</option>
-                {TEST_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
-              </select>
-            </details>
+              <span id="reasoning-help">{hasConversation ? "New inquiry to change. " : ""}Source checks use Medium.</span>
+            </div>
           </form>
   );
 
