@@ -3,15 +3,18 @@ import { afterEach, expect, mock, test } from "bun:test";
 const calls = [];
 let toolResults = true;
 let searchFails = false;
+let draft = "An interpretation.";
+let revision = "A shorter interpretation.";
 const create = mock(async (params) => {
   calls.push(params);
+  if (!params.stream && !params.tools) return { choices: [{ message: { content: revision } }] };
   if (!params.stream && searchFails) throw new Error("Provider unavailable");
   if (!params.stream) return {
     choices: [{ message: { content: "MODEL SUMMARY MUST NOT BECOME EVIDENCE",
       executed_tools: toolResults ? [{ type: "browser_search", arguments: "{}", index: 0,
         browser_results: [{ title: "Primary document", url: "https://example.org/document", content: "Source passage." }] }] : [] } }],
   };
-  return (async function* () { yield { choices: [{ delta: { content: "An interpretation." } }] }; })();
+  return (async function* () { yield { choices: [{ delta: { content: draft } }] }; })();
 });
 mock.module("groq-sdk", () => ({ default: class { chat = { completions: { create } }; } }));
 const { POST } = await import("./route");
@@ -21,8 +24,41 @@ afterEach(() => {
   calls.length = 0;
   toolResults = true;
   searchFails = false;
+  draft = "An interpretation.";
+  revision = "A shorter interpretation.";
   if (originalKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = originalKey;
   if (originalModel === undefined) delete process.env.GROQ_MODEL; else process.env.GROQ_MODEL = originalModel;
+});
+
+test("overlong draft is withheld, rewritten with context, and emitted only after validation", async () => {
+  draft = Array(141).fill("word").join(" ");
+  const events = await ask("Explain a principle");
+  expect(calls).toHaveLength(2);
+  expect(calls[1].tools).toBeUndefined();
+  expect(JSON.parse(calls[1].messages.at(-1).content).Draft).toBe(draft);
+  expect(events.filter(e => e.type === "text").map(e => e.text)).toEqual([revision]);
+  expect(events.findLast(e => e.type === "metadata").answerRewritten).toBe(true);
+});
+
+test("failed rewrite emits no partial answer and makes no further attempts", async () => {
+  draft = revision = Array(141).fill("word").join(" ");
+  const events = await ask("Explain a principle");
+  expect(calls).toHaveLength(2);
+  expect(events.some(e => e.type === "text")).toBe(false);
+  expect(events.at(-1).text).toContain("response limit");
+});
+
+test("probe rewrite retains target and evidence without a second search", async () => {
+  draft = Array(141).fill("word").join(" ");
+  revision = "A qualified interpretation. [Source](https://example.org/document)";
+  const events = await ask("Please verify the source");
+  expect(calls).toHaveLength(3);
+  expect(calls.filter(call => call.tools)).toHaveLength(1);
+  const originalInput = JSON.parse(calls[2].messages.at(-2).content);
+  expect(originalInput.Reference).toContain("Source passage.");
+  expect(originalInput.Question).toBe("Please verify the source");
+  expect(events.find(e => e.type === "text").text).toBe(revision);
+  expect(events.findLast(e => e.type === "metadata").evidenceToken).toBeTruthy();
 });
 async function ask(content, evidenceToken = "") {
   process.env.GROQ_API_KEY = "test-only-key";

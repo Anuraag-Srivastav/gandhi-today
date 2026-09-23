@@ -1,6 +1,6 @@
 import type { ChatMessage } from "./types";
 
-export const PROMPT_VERSION = "v19";
+export const PROMPT_VERSION = "v20";
 export const MAX_MESSAGES = 80;
 export const MAX_CONTENT_LENGTH = 8000;
 export const MAX_TOTAL_LENGTH = 100000;
