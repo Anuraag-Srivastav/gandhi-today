@@ -10,18 +10,28 @@ import {
 } from "react";
 import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
 
-function sanitizeOutput(text: string) {
-  return text.replace(/\*/g, " ");
+function renderLinks(text: string) {
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+)/g;
+  const parts = [];
+  let previous = 0;
+  for (const match of text.matchAll(pattern)) {
+    parts.push(text.slice(previous, match.index));
+    const href = (match[2] || match[3]).replace(/[.,;]+$/, "");
+    parts.push(<a key={match.index} href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{match[1] || href}</a>);
+    previous = match.index! + match[0].length;
+  }
+  parts.push(text.slice(previous));
+  return parts;
 }
 
 function renderContent(text: string) {
-  const paragraphs = sanitizeOutput(text).split(/\n{2,}/);
+  const paragraphs = text.split(/\n{2,}/);
 
   return paragraphs.map((paragraph, index) => (
     <p key={index}>
       {paragraph.split("\n").map((line, lineIndex, lines) => (
         <span key={lineIndex}>
-          {line}
+          {renderLinks(line)}
           {lineIndex < lines.length - 1 ? <br /> : null}
         </span>
       ))}
@@ -53,6 +63,9 @@ export function Chat() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState("Preparing an answer…");
+  const [diagnostic, setDiagnostic] = useState("");
+  const evidenceRef = useRef("");
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -71,12 +84,12 @@ export function Chat() {
   }, [input]);
 
   const statusLabel = useMemo(() => {
-    if (isLoading) return "Considering the historical record…";
-    if (hasConversation) return "A reconstruction from documented principles";
+    if (isLoading) return progress;
+    if (hasConversation) return "Gandhi's views and interpretation";
     return "Ask a present-day question";
-  }, [hasConversation, isLoading]);
+  }, [hasConversation, isLoading, progress]);
 
-  async function send(content: string) {
+  async function send(content: string, verifySources = false) {
     const trimmed = content.trim();
     if (!trimmed || isLoading) return;
 
@@ -89,6 +102,7 @@ export function Chat() {
     setInput("");
     setError(null);
     setIsLoading(true);
+    setProgress(verifySources ? "Checking sources…" : "Preparing an answer…");
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -97,7 +111,7 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages }),
+        body: JSON.stringify({ messages: nextMessages, evidenceToken: evidenceRef.current, verifySources }),
         signal: controller.signal,
       });
 
@@ -117,19 +131,42 @@ export function Chat() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let assistant = "";
+      let pending = "";
+      let completed = false;
       setMessages([...nextMessages, { role: "assistant", content: "" }]);
 
+      function consume(line: string) {
+        if (!line.trim() || controller.signal.aborted) return;
+        const event = JSON.parse(line);
+        if (event.type === "status") setProgress(event.text);
+        if (event.type === "metadata") {
+          evidenceRef.current = event.evidenceToken;
+          setDiagnostic([event.promptVersion, event.promptHash, event.model, "search: " + event.searchStatus, "tools: " + event.toolsExecuted, "request: " + event.requestId].join(" · "));
+        }
+        if (event.type === "error") throw new Error(event.text);
+        if (event.type === "done") completed = true;
+        if (event.type === "text") {
+          assistant += event.text;
+          setMessages([...nextMessages, { role: "assistant", content: assistant }]);
+        }
+      }
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        assistant += sanitizeOutput(decoder.decode(value, { stream: true }));
-        setMessages([...nextMessages, { role: "assistant", content: assistant }]);
+        pending += decoder.decode(value, { stream: true });
+        let newline;
+        while ((newline = pending.indexOf("\n")) >= 0) {
+          consume(pending.slice(0, newline));
+          pending = pending.slice(newline + 1);
+        }
       }
+      consume(pending + decoder.decode());
+      if (!completed && !controller.signal.aborted) throw new Error("The answer was interrupted. Please retry.");
     } catch (caught) {
-      if ((caught as { name?: string }).name === "AbortError") return;
+      if (controller.signal.aborted) return;
       setMessages((current) => {
         const last = current.at(-1);
-        if (last?.role === "assistant" && last.content === "") {
+        if (last?.role === "assistant") {
           return current.slice(0, -1);
         }
         return current;
@@ -140,8 +177,10 @@ export function Chat() {
           : "Something went wrong while reconstructing the answer.",
       );
     } finally {
-      setIsLoading(false);
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        setIsLoading(false);
+        abortRef.current = null;
+      }
     }
   }
 
@@ -159,6 +198,9 @@ export function Chat() {
 
   function reset() {
     abortRef.current?.abort();
+    abortRef.current = null;
+    evidenceRef.current = "";
+    setDiagnostic("");
     setMessages([]);
     setError(null);
     setIsLoading(false);
@@ -182,8 +224,8 @@ export function Chat() {
               What would Gandhi say today?
             </h1>
             <p className="mt-1.5 max-w-md text-sm leading-relaxed text-ink-soft">
-              Historically grounded answers drawn from his documented philosophy,
-              applied to the circumstances of now.
+              Explore Gandhi&apos;s ideas and their possible application today.
+              Ask to verify sources when you want supporting evidence.
             </p>
           </div>
         </div>
@@ -222,7 +264,7 @@ export function Chat() {
                   <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
                     Ask about a present-day issue. The reply reconstructs what
                     Gandhi might say from his writings, speeches, and principles.
-                    It is not a newly invented quotation.
+                    Interpretations are not authentic quotations. Source checks are available on request.
                   </p>
                 </div>
                 <div>
@@ -264,7 +306,7 @@ export function Chat() {
                       >
                         {!isUser ? (
                           <p className="font-ui mb-2 text-[10px] tracking-[0.22em] text-saffron-deep uppercase">
-                            Reconstruction
+                            Answer
                           </p>
                         ) : null}
                         {isEmptyAssistant ? (
@@ -273,7 +315,7 @@ export function Chat() {
                             <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-saffron" />
                             <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-saffron" />
                             <span className="ml-2 text-sm italic">
-                              Reading the historical record
+                              {progress}
                             </span>
                           </div>
                         ) : (
@@ -316,7 +358,12 @@ export function Chat() {
               {isLoading ? (
                 <button
                   type="button"
-                  onClick={() => abortRef.current?.abort()}
+                  onClick={() => {
+                    abortRef.current?.abort();
+                    abortRef.current = null;
+                    setMessages((current) => current.at(-1)?.role === "assistant" ? current.slice(0, -1) : current);
+                    setIsLoading(false);
+                  }}
                   className="font-ui mb-1 rounded-full border border-earth/20 px-3 py-2 text-xs text-earth hover:text-saffron-deep"
                 >
                   Stop
@@ -332,8 +379,14 @@ export function Chat() {
               )}
             </div>
             <p className="font-ui mt-2 text-center text-[11px] tracking-wide text-ink-soft">
-              Direct answer first, then the documented principle it rests on.
+              Interpretation is distinct from verified history.
             </p>
+            {hasConversation && !isLoading && messages.at(-1)?.role === "assistant" ? (
+              <button type="button" className="mt-2 text-sm underline" onClick={() => void send("Please verify the sources for your previous answer and correct any unsupported claims.", true)}>
+                Verify sources
+              </button>
+            ) : null}
+            {diagnostic ? <details className="mt-2 text-xs text-ink-soft"><summary>Test details</summary><p className="break-words">{diagnostic}</p></details> : null}
           </form>
         </div>
       </main>

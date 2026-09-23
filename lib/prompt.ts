@@ -19,3 +19,13 @@ export function getSystemPrompt() {
 
   return raw;
 }
+
+/** Keep untrusted inputs in a user message, never interpolate them into system rules. */
+export function getPromptRules() {
+  return getSystemPrompt().split("## Inputs")[0].trim();
+}
+
+export function formatQuestion(question: string, reference: string) {
+  // JSON encoding prevents source text from closing a structural XML delimiter.
+  return JSON.stringify({ Question: question, Reference: reference });
+}
