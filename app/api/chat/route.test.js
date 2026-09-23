@@ -1,12 +1,20 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 
 const calls = [];
+const routingCalls = [];
+let planKind = "interpretation";
+let invalidPlan = false;
 let toolResults = true;
 let searchFails = false;
 let hangSearch = false;
 let draft = "An interpretation.";
 let revision = "A shorter interpretation.";
 const create = mock(async (params, options) => {
+  if (params.response_format) {
+    routingCalls.push(params);
+    const question = JSON.parse(params.messages.at(-1).content).conversation.at(-1).content;
+    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind: planKind, question }) } }] };
+  }
   calls.push(params);
   if (params.tools && hangSearch) return new Promise((_, reject) => {
     options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
@@ -26,6 +34,9 @@ const originalKey = process.env.GROQ_API_KEY;
 const originalModel = process.env.GROQ_MODEL;
 afterEach(() => {
   calls.length = 0;
+  routingCalls.length = 0;
+  planKind = "interpretation";
+  invalidPlan = false;
   toolResults = true;
   searchFails = false;
   hangSearch = false;
@@ -110,32 +121,69 @@ async function ask(content, evidenceToken = "") {
     body: JSON.stringify({ messages: [{ role: "user", content }], evidenceToken }) }));
   return (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
 }
-test("background reading does not depend on search availability", async () => {
-  searchFails = true;
+test("background reading retrieves bibliographic evidence before recommendation", async () => {
+  planKind = "reading";
   const events = await ask("What can I read on this?");
+  expect(calls).toHaveLength(2);
+  expect(calls[0].tools).toBeDefined();
+  expect(JSON.parse(calls[0].messages.at(-1).content).purpose).toBe("reading");
+  expect(events.at(-1).type).toBe("done");
+});
+
+test("invalid routing fails explicitly without searching or answering", async () => {
+  invalidPlan = true;
+  const events = await ask("A question");
+  expect(routingCalls).toHaveLength(1);
+  expect(calls).toHaveLength(0);
+  expect(events.some(e => e.type === "text")).toBe(false);
+  expect(events.findLast(e => e.type === "metadata").stage).toBe("Question routing");
+});
+
+test("historical search failure never falls back to an unsourced historical answer", async () => {
+  planKind = "historical";
+  searchFails = true;
+  const events = await ask("A historical question");
+  expect(calls).toHaveLength(1);
+  expect(calls[0].tools).toBeDefined();
+  expect(events.some(e => e.type === "text")).toBe(false);
+});
+
+test("historical generation failure can reuse evidence on the identical retry", async () => {
+  planKind = "historical";
+  draft = revision = Array(141).fill("word").join(" ");
+  const events = await ask("A historical question");
+  const saved = events.find(e => e.retryToken);
+  expect(saved).toBeTruthy();
+  calls.length = 0;
+  draft = "Supported answer.";
+  const response = await POST(new Request("http://localhost/api/chat", {method:"POST",body:JSON.stringify({
+    messages:[{role:"user",content:"A historical question"}], evidenceToken:saved.evidenceToken,retryToken:saved.retryToken,
+  })}));
+  expect(await response.text()).toContain("reused-evidence");
   expect(calls).toHaveLength(1);
   expect(calls[0].tools).toBeUndefined();
-  expect(events.at(-1).type).toBe("done");
 });
 
 test("a new historical topic after verification has an ordinary turn policy with retained evidence", async () => {
   const first = await ask("Please verify the source");
   const token = first.find(e => e.evidenceToken)?.evidenceToken;
   calls.length = 0;
+  planKind = "historical";
   const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
     messages: [{ role: "user", content: "Explain a technology" }, { role: "assistant", content: "A prior source audit limited to technology." }, { role: "user", content: "When was a different organisation founded?" }], evidenceToken: token,
   }) }));
   const output = await response.text();
-  expect(calls).toHaveLength(1);
-  expect(calls[0].tools).toBeUndefined();
-  const policy = calls[0].messages.at(-2);
+  expect(calls).toHaveLength(2);
+  expect(calls[0].tools).toBeDefined();
+  const policy = calls[1].messages.at(-2);
   expect(policy.role).toBe("system");
-  expect(policy.content).toContain("not a continuation of a source audit");
-  expect(JSON.parse(calls[0].messages.at(-1).content).Reference).toContain("Source passage");
-  expect(output).toContain('"mode":"ordinary"');
+  expect(policy.content).toContain("Answer the historical question");
+  expect(JSON.parse(calls[1].messages.at(-1).content).Reference).toContain("Source passage");
+  expect(output).toContain('"mode":"historical"');
 });
 
 test("inference challenge receives reassessment policy without forced search", async () => {
+  planKind = "reassessment";
   const events = await ask("Which part is inference?");
   expect(calls).toHaveLength(1);
   expect(calls[0].messages.at(-2).content).toContain("Withdraw unsupported claims");
@@ -148,13 +196,14 @@ test("explicit online reading still searches with a focused evidence-only reques
   expect(calls[0].messages).toHaveLength(2);
   expect(calls[0].messages[0].content).toContain("Do not write a final user answer");
 });
-test("ordinary answers have no tools and receive populated inputs", async () => {
+test("historical answers retrieve before generation and receive populated evidence", async () => {
+  planKind = "historical";
   const events = await ask("What did Gandhi think about money?");
-  expect(calls).toHaveLength(1);
-  expect(calls[0].tools).toBeUndefined();
-  const messages = calls[0].messages;
-  expect(JSON.parse(messages.at(-1).content).Reference).toBe("");
-  expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("not-requested");
+  expect(calls).toHaveLength(2);
+  expect(calls[0].tools).toBeDefined();
+  const messages = calls[1].messages;
+  expect(JSON.parse(messages.at(-1).content).Reference).toContain("Source passage");
+  expect(events.findLast((e) => e.type === "metadata").searchStatus).toBe("results-returned");
   expect(events.at(-1).type).toBe("done");
 });
 

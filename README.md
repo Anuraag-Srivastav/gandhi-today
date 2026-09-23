@@ -31,7 +31,7 @@ Set **`GROQ_API_KEY`** in the Vercel project: Settings → Environment Variables
 - The response is newline-delimited JSON containing status, metadata, text, done or error events. The UI renders HTTP(S) links and removes interrupted replies from later model history.
 - **Test details** shows prompt version/hash, model, search status, executed-tool count and request ID. Server logs contain this metadata, not question text, source passages or API keys.
 
-The prompt is v21. Source inspection does not guarantee historical accuracy; verify that cited passages actually support each claim. Search-trigger detection is explicit English matching, not a semantic classifier. Use **Verify sources** for wording it misses. No search is performed automatically for an ordinary current-fact question.
+The prompt is v24. A bounded semantic routing call resolves the current question from history without supplying an answer. Historical questions and reading recommendations retrieve evidence before generation. Modern interpretations, definitions and inference challenges remain search-free; explicit verification still triggers retrieval. Source inspection does not guarantee historical accuracy: evaluate whether passages support the entire claim and its qualifications.
 
 Search receives a focused evidence-only request containing the current question and target answer, rather than the full conversation. Final generation retains the conversation. Search remains capped at 45 seconds; generation at 40 seconds; one optional length rewrite at 20 seconds, within 105 seconds overall. There are no automatic retries. Run `bun scripts/check-source.ts 'your source question'` with GROQ_API_KEY configured to measure search independently of answer generation. It outputs only elapsed time, tool count, finish reason or safe failure category, never credentials or source text. A timeout without returned tool records does not prove no tools started.
 
@@ -43,7 +43,7 @@ Groq documentation: https://console.groq.com/docs/tool-use/built-in-tools/browse
 
 `bun scripts/evaluate.ts https://www.gandhisays.com` runs the ten core evaluation sequences plus two diagnostic sequences, sequentially. Optional third argument selects comma-separated sequence numbers. Output is JSONL with questions, answers, version/hash, timing, failures and mechanical format checks; signed context tokens are omitted. A failed sequence stops rather than asking follow-ups against missing answers. This invokes the live provider and uses its quota. It does not automatically award a historical accuracy score. Evaluation inputs never enter production prompt construction.
 
-V23 selects an ordinary, reading, reassessment or verification policy for each turn. The policy is supplied after conversation history to prevent previous audits from constraining later ordinary questions. Retained evidence remains available; irrelevant evidence is not a refusal condition. Corrections distinguish unsupported attribution from an assertion that no record exists. Unit tests establish request construction, not model compliance; live transcripts remain required.
+V24 routing uses typed JSON (`historical`, `interpretation`, `definition`, `reading`, `reassessment`, `unrelated`) and fails explicitly on invalid output. It receives full conversational context as data, not answer examples. Routing has a ten-second deadline within the same 105-second overall limit. Source-bearing turns use Medium/temperature zero; search-free turns retain the selected effort with temperature 0.2. The per-turn policy follows history. Evidence retry receipts also cover historical generation failures. Unit tests establish request construction, not model compliance; live transcripts remain required.
 
 Runtime `v22-verification2` targets concise verification corrections within the unchanged 140-word/three-paragraph gate. Failed refinement reports the exact size violation. The Retry button can reuse retrieved evidence using a signed, expiring receipt bound to the full request and evidence hash; changed questions cannot reuse that permission. `reused-evidence` means no new search occurred. Raw rejected drafts are neither displayed nor logged.
 
@@ -54,7 +54,7 @@ These mock Groq and do not prove live tool availability.
 
 After deployment:
 
-1. Start a new inquiry and ask an ordinary Gandhi question. Test details should show not-requested, tools 0.
+1. Start a new inquiry and ask for a modern interpretation. Test details should show interpretation, not-requested, tools 0. A historical question should instead show historical with actual search status.
 2. Ask for a source or press **Verify sources**. Expect results-returned and a positive tool count; inspect linked passages independently.
 3. Ask a follow-up explanation. Search should remain off while retained source evidence is available.
 4. Check a historical date and its source, then challenge the source. Do not award citation points merely for author-year formatting.

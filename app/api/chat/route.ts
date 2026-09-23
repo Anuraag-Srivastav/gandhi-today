@@ -9,11 +9,12 @@ import { AnswerLimitError, answerSize, enforceAnswerLimits } from "@/lib/answer-
 import { providerFailure } from "@/lib/provider-failure";
 import { sourceRequest } from "@/lib/source-request";
 import { answerMode, turnInstruction } from "@/lib/answer-mode";
+import { needsEvidence, parseAnswerPlan, planRequest, type AnswerKind } from "@/lib/answer-plan";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-/** Source probes retrieve tool output before the answer is streamed. */
+/** Resolve turn intent, retrieve historical evidence, then generate a bounded answer. */
 export async function POST(request: Request) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return Response.json({ error: "GROQ_API_KEY is not configured." }, { status: 500 });
@@ -36,7 +37,9 @@ export async function POST(request: Request) {
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
   const question = messages.at(-1)!.content;
   const probe = body.verifySources === true || isSourceProbe(question);
-  const mode = answerMode(question, probe);
+  let mode: ReturnType<typeof answerMode> | AnswerKind = answerMode(question, probe);
+  let resolvedQuestion = question;
+  let sourceRequired = probe;
   const retryIdentity = createHash("sha256").update(JSON.stringify({ messages, probe })).digest("hex");
   const referenceHash = createHash("sha256").update(reference).digest("hex");
   let reuseEvidence = false;
@@ -45,7 +48,7 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid or expired retry context. Send a new source request." }, { status: 400 });
   }
-  const reasoningEffort: "low" | "medium" = probe ? "medium" : body.reasoningEffort || "low";
+  let reasoningEffort: "low" | "medium" = probe ? "medium" : body.reasoningEffort || "low";
   const targetIndex = messages.findLastIndex((message) => message.role === "assistant");
   const verificationTarget = probe && targetIndex >= 0 ? {
     question: messages.slice(0, targetIndex).findLast((message) => message.role === "user")?.content,
@@ -73,7 +76,7 @@ export async function POST(request: Request) {
       const emit = (event: object) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
       let toolsExecuted = 0;
       let searchStatus = probe ? reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
-      let stage = probe && !reuseEvidence ? "Source search" : "Answer generation";
+      let stage = probe && !reuseEvidence ? "Source search" : probe ? "Answer generation" : "Question routing";
       let timedOut = false;
       let failureCode: string | undefined;
       let providerStatus: number | undefined;
@@ -85,16 +88,28 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v23-regression1" });
+        promptHash, model, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-evidence1" });
       const heartbeat = setInterval(() => {
         if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
       }, 10000);
       report();
       try {
-        emit({ type: "status", text: reuseEvidence ? "Preparing a correction using the retrieved evidence…" : probe ? "Checking sources…" : "Preparing an interpretation…" });
-        if (probe && !reuseEvidence) {
+        if (!probe) {
+          arm("Question routing", 10000);
+          const routing = await groq.chat.completions.create(planRequest(model, messages), { signal: abort.signal });
+          const plan = parseAnswerPlan(routing.choices[0]?.message.content || "");
+          mode = plan.kind;
+          resolvedQuestion = plan.question;
+          sourceRequired = needsEvidence(plan.kind);
+          if (sourceRequired && !supportsBrowserSearch(model)) throw new Error("The configured model does not support historical source retrieval.");
+          if (sourceRequired) reasoningEffort = "medium";
+          searchStatus = sourceRequired ? reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
+          report();
+        }
+        emit({ type: "status", text: sourceRequired && reuseEvidence ? "Using the retrieved evidence…" : sourceRequired ? "Checking sources…" : "Preparing an answer…" });
+        if (sourceRequired && !reuseEvidence) {
           arm("Source search", 45000);
-          const research = await groq.chat.completions.create(sourceRequest(model, question, verificationTarget), { signal: abort.signal });
+          const research = await groq.chat.completions.create(sourceRequest(model, resolvedQuestion, verificationTarget, probe ? "verification" : mode === "reading" ? "reading" : "historical"), { signal: abort.signal });
           const tools = research.choices[0]?.message.executed_tools || [];
           const browserTools = tools.filter((tool) => /browser|search/i.test(tool.type));
           toolsExecuted = browserTools.length;
@@ -104,15 +119,15 @@ export async function POST(request: Request) {
             browser_results: tool.browser_results, search_results: tool.search_results,
           })).filter((tool) => tool.output || tool.browser_results?.length || tool.search_results);
           if (records.length) {
-            reference = selectSourceEvidence(records, question + " " + JSON.stringify(verificationTarget));
+            reference = selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget));
             searchStatus = "results-returned";
           } else {
             searchStatus = toolsExecuted ? "no-results" : "no-tool-record";
           }
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
-        const retryToken = probe && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: probe ? 0 : 0.4, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v23-regression1" };
+        const retryToken = sourceRequired && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model, temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-evidence1" };
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken });
         emit({ type: "status", text: "Preparing an answer…" });
