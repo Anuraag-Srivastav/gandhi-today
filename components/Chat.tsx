@@ -9,19 +9,21 @@ import {
   useState,
 } from "react";
 import { SUGGESTED_INQUIRIES, type ChatMessage } from "@/lib/types";
+import Link from "next/link";
+import { plainAnswerText } from "@/lib/answer-display";
 
 function renderLinks(text: string) {
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+)/g;
   const parts = [];
   let previous = 0;
   for (const match of text.matchAll(pattern)) {
-    parts.push(text.slice(previous, match.index));
+    parts.push(plainAnswerText(text.slice(previous, match.index)));
     const href = (match[2] || match[3]).replace(/[.,;]+$/, "");
-    parts.push(<a key={match.index} href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{match[1] || href}</a>);
+    parts.push(<a key={match.index} href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{match[1] ? plainAnswerText(match[1]) : href}</a>);
     if (match[3]) parts.push(match[3].slice(href.length));
     previous = match.index! + match[0].length;
   }
-  parts.push(text.slice(previous));
+  parts.push(plainAnswerText(text.slice(previous)));
   return parts;
 }
 
@@ -305,6 +307,8 @@ export function Chat() {
             </p>
           </div>
         </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+        <Link href="/quiz" className="font-ui inline-flex min-h-11 items-center px-2 text-xs text-ink-soft underline underline-offset-4 hover:text-saffron-deep">Quiz</Link>
         {hasConversation ? (
           <button
             type="button"
@@ -314,6 +318,7 @@ export function Chat() {
             New inquiry
           </button>
         ) : null}
+        </div>
       </header>
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pb-4 sm:px-8">

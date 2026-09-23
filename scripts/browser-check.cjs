@@ -22,7 +22,7 @@ const assert = require('node:assert/strict');
         const events = [
           { type: 'metadata', promptVersion: 'v22', promptHash: 'test', model: 'mock', searchStatus: failure ? 'answer-failed' : 'results-returned', toolsExecuted: 1, requestId: 'browser-test', evidenceToken: 'signed-test-token', retryToken: 'signed-retry-token' },
           ...(failure ? [{ type: 'error', text: 'Source service unavailable. Please retry.' }] : [
-            { type: 'text', text: 'A cautious interpretation. [Source](https://example.org/gandhi). See https://example.org/reading.' },
+            { type: 'text', text: 'A cautious interpretation of *ahimsa* and **swaraj**. [Source](https://example.org/gandhi). See https://example.org/reading.' },
             ...(interrupted ? [] : [{ type: 'done' }]),
           ]),
         ];
@@ -50,6 +50,7 @@ const assert = require('node:assert/strict');
       assert.equal(requests[0].reasoningEffort, undefined, 'server controls reasoning defaults');
       assert.equal(await page.getByRole('link', { name: 'Source', exact: true }).getAttribute('href'), 'https://example.org/gandhi');
       assert((await page.locator('article').last().innerText()).endsWith('reading.'), 'preserve punctuation');
+      assert(!(await page.locator('article').last().innerText()).includes('*'), 'emphasis markers are not displayed');
       await page.getByRole('button', { name: 'Verify sources' }).click();
       await page.getByRole('button', { name: 'Verify sources' }).waitFor();
       assert.equal(requests[1].verifySources, true);
@@ -81,6 +82,13 @@ const assert = require('node:assert/strict');
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no page overflow');
       assert.deepEqual(errors, []);
       await page.screenshot({ path: `/tmp/gandhi-chat-${width}.png`, fullPage: true });
+      const requestCount = requests.length;
+      await page.getByRole('link', { name: 'Quiz', exact: true }).click();
+      await page.getByRole('button', { name: 'शुरू करें →' }).click();
+      for (let i = 0; i < 5; i++) await page.getByRole('button', { name: 'यह सवाल छोड़ें' }).click();
+      await page.getByText('सही: 0 · गलत: 0 · छोड़े: 5', { exact: true }).waitFor();
+      assert.equal(requests.length, requestCount, 'quiz makes no model requests');
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'quiz has no page overflow');
       console.log(`PASS ${width}px: layout, accessibility label, submit, links, punctuation, verification, evidence retention, error diagnostics, interrupted stream, reset, overflow, browser errors`);
       await page.close();
     }
