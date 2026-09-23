@@ -25,7 +25,7 @@ const create = mock(async (params, options) => {
     const kind = /source please|verify|citation please|search online|check.*sources/i.test(question) ? "verification" : planKind;
     const last = conversation.findLastIndex(m => m.role === "assistant");
     const targetIndex = ["verification", "reassessment"].includes(kind) ? selectedTarget ?? (last >= 0 ? last : null) : null;
-    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind, question, targetIndex }) } }] };
+    return { choices: [{ message: { content: invalidPlan ? "invalid" : JSON.stringify({ kind, question, targetIndex, quotationCheck:false, quotationText:null }) } }] };
   }
   calls.push(params);
   if (params.tools && hangSearch) return new Promise((_, reject) => {
