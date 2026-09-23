@@ -6,13 +6,12 @@ let searchFails = false;
 let hangSearch = false;
 let draft = "An interpretation.";
 let revision = "A shorter interpretation.";
-let reviewText = null;
 const create = mock(async (params, options) => {
   calls.push(params);
   if (params.tools && hangSearch) return new Promise((_, reject) => {
     options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
   });
-  if (!params.stream && !params.tools) return { choices: [{ message: { content: params.messages.some(m => m.content?.startsWith("Act as a strict editor")) ? reviewText ?? draft : revision } }] };
+  if (!params.stream && !params.tools) return { choices: [{ message: { content: revision } }] };
   if (!params.stream && searchFails) throw new Error("Provider unavailable");
   if (!params.stream) return {
     choices: [{ message: { content: "MODEL SUMMARY MUST NOT BECOME EVIDENCE",
@@ -32,7 +31,6 @@ afterEach(() => {
   hangSearch = false;
   draft = "An interpretation.";
   revision = "A shorter interpretation.";
-  reviewText = null;
   if (originalKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = originalKey;
   if (originalModel === undefined) delete process.env.GROQ_MODEL; else process.env.GROQ_MODEL = originalModel;
 });
@@ -52,21 +50,10 @@ test("source deadline aborts provider work and emits timeout diagnostics", async
   } finally { timer.mockRestore(); }
 });
 
-test("only reviewed ordinary answer is delivered and review has original evidence", async () => {
-  draft = "An unsupported prescription.";
-  reviewText = "A cautious interpretation.";
-  const events = await ask("Explain a modern dilemma");
-  expect(events.filter(e => e.type === "text").map(e => e.text)).toEqual([reviewText]);
-  expect(events.findLast(e => e.type === "metadata").answerReviewed).toBe(true);
-  expect(calls[1].reasoning_effort).toBe("medium");
-  expect(calls[1].tools).toBeUndefined();
-  expect(calls[1].messages.some(m => m.content?.includes('"Reference":""'))).toBe(true);
-});
-
 test("overlong draft is withheld, rewritten with context, and emitted only after validation", async () => {
   draft = Array(141).fill("word").join(" ");
   const events = await ask("Explain a principle");
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(2);
   expect(calls[1].tools).toBeUndefined();
   expect(JSON.parse(calls[1].messages.at(-1).content).Draft).toBe(draft);
   expect(events.filter(e => e.type === "text").map(e => e.text)).toEqual([revision]);
@@ -76,7 +63,7 @@ test("overlong draft is withheld, rewritten with context, and emitted only after
 test("failed rewrite emits no partial answer and makes no further attempts", async () => {
   draft = revision = Array(141).fill("word").join(" ");
   const events = await ask("Explain a principle");
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(2);
   expect(events.some(e => e.type === "text")).toBe(false);
   expect(events.at(-1).text).toContain("response limit");
 });
@@ -126,7 +113,7 @@ async function ask(content, evidenceToken = "") {
 test("background reading does not depend on search availability", async () => {
   searchFails = true;
   const events = await ask("What can I read on this?");
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   expect(calls[0].tools).toBeUndefined();
   expect(events.at(-1).type).toBe("done");
 });
@@ -139,19 +126,18 @@ test("a new historical topic after verification has an ordinary turn policy with
     messages: [{ role: "user", content: "Explain a technology" }, { role: "assistant", content: "A prior source audit limited to technology." }, { role: "user", content: "When was a different organisation founded?" }], evidenceToken: token,
   }) }));
   const output = await response.text();
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   expect(calls[0].tools).toBeUndefined();
   const policy = calls[0].messages.at(-2);
   expect(policy.role).toBe("system");
   expect(policy.content).toContain("not a continuation of a source audit");
   expect(JSON.parse(calls[0].messages.at(-1).content).Reference).toContain("Source passage");
   expect(output).toContain('"mode":"ordinary"');
-  expect(calls.at(-1).messages.some(m => m.content?.startsWith("Act as a strict editor"))).toBe(true);
 });
 
 test("inference challenge receives reassessment policy without forced search", async () => {
   const events = await ask("Which part is inference?");
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   expect(calls[0].messages.at(-2).content).toContain("Withdraw unsupported claims");
   expect(events.findLast(e => e.type === "metadata").mode).toBe("reassessment");
 });
@@ -164,7 +150,7 @@ test("explicit online reading still searches with a focused evidence-only reques
 });
 test("ordinary answers have no tools and receive populated inputs", async () => {
   const events = await ask("What did Gandhi think about money?");
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   expect(calls[0].tools).toBeUndefined();
   const messages = calls[0].messages;
   expect(JSON.parse(messages.at(-1).content).Reference).toBe("");
@@ -178,7 +164,7 @@ test("controlled comparison changes effort only, not prompt or token budget", as
     process.env.GROQ_API_KEY = "test-only-key";
     const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({ messages: [{ role: "user", content: "Explain self-rule" }], reasoningEffort }) }));
     await response.text();
-    inputs.push(calls.at(-2));
+    inputs.push(calls.at(-1));
   }
   expect(inputs[0].reasoning_effort).toBe("low");
   expect(inputs[1].reasoning_effort).toBe("medium");
@@ -201,7 +187,7 @@ test("probe executes search and retains actual evidence for later turns", async 
   expect(metadata.toolsExecuted).toBe(1);
   calls.length = 0;
   await ask("Explain the idea simply", metadata.evidenceToken);
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   expect(JSON.parse((calls[0].messages).at(-1).content).Reference).toContain("Source passage.");
 });
 
@@ -210,7 +196,7 @@ test("ordinary definition after a probe stays answerable without another search"
   const token = events.findLast(e => e.type === "metadata").evidenceToken;
   calls.length = 0;
   await ask("What is AI?", token);
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(1);
   expect(calls[0].messages[0].content).toContain("Answer ordinary definitions from general knowledge");
   expect(calls[0].messages[0].content).toContain("Its presence does not make ordinary questions source-only tasks");
 });
