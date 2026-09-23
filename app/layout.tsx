@@ -22,9 +22,9 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Gandhi Says — History and interpretation",
+  title: "What would Gandhi say today?",
   description:
-    "Explore Gandhi’s recorded ideas and their careful application to present-day questions—clearly separating history from interpretation.",
+    "A historically grounded reconstruction of how Mahatma Gandhi might speak to present-day issues.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

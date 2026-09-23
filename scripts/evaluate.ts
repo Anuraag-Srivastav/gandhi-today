@@ -4,7 +4,6 @@
  */
 import { sequences } from "./evaluation-cases";
 import { answerSize } from "../lib/answer-limits";
-import { resultContext } from "../lib/inquiry-result";
 const base = process.argv[2];
 if (!base || !/^https?:\/\//.test(base)) throw new Error("Supply the app URL explicitly.");
 const selected = process.argv[3]?.split(",").map(Number) || sequences.map((_, i) => i + 1);
@@ -31,15 +30,13 @@ for (const n of selected) {
         if (typeof token === "string") evidenceToken = token;
         metadata = { ...metadata, ...safe };
       }
-      const result = events.find(e => e.type === "result")?.result;
-      const answer = result?.shortAnswer || "";
+      const answer = events.filter(e => e.type === "text").map(e => e.text).join("");
       const failure = events.find(e => e.type === "error")?.text;
       const completed = events.some(e => e.type === "done") && !!answer;
-      console.log(JSON.stringify({ sequence: n, question, answer, result, completed, failure, elapsedMs: Date.now() - started, metadata,
+      console.log(JSON.stringify({ sequence: n, question, answer, completed, failure, elapsedMs: Date.now() - started, metadata,
         size: answerSize(answer), malformedCitation: /【|\[Source\s*\[/.test(answer), semanticScore: "manual-review-required" }));
       if (!completed) break;
-      if (events.some(e => e.type === "source-check")) messages.splice(-2, 2);
-      messages.push({ role: "assistant", content: resultContext(result) });
+      messages.push({ role: "assistant", content: answer });
     } catch (error) {
       console.log(JSON.stringify({ sequence: n, question, completed: false, failure: error instanceof Error ? error.message : "Unknown failure", elapsedMs: Date.now() - started }));
       break;
