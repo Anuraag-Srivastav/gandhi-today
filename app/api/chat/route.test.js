@@ -87,6 +87,20 @@ async function ask(content, evidenceToken = "") {
     body: JSON.stringify({ messages: [{ role: "user", content }], evidenceToken }) }));
   return (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
 }
+test("background reading does not depend on search availability", async () => {
+  searchFails = true;
+  const events = await ask("What can I read on this?");
+  expect(calls).toHaveLength(1);
+  expect(calls[0].tools).toBeUndefined();
+  expect(events.at(-1).type).toBe("done");
+});
+
+test("explicit online reading still searches with a focused evidence-only request", async () => {
+  await ask("Search online for further reading");
+  expect(calls[0].tools).toBeDefined();
+  expect(calls[0].messages).toHaveLength(2);
+  expect(calls[0].messages[0].content).toContain("Do not write a final user answer");
+});
 test("ordinary answers have no tools and receive populated inputs", async () => {
   const events = await ask("What did Gandhi think about money?");
   expect(calls).toHaveLength(1);

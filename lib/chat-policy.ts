@@ -1,6 +1,6 @@
 import type { ChatMessage } from "./types";
 
-export const PROMPT_VERSION = "v20";
+export const PROMPT_VERSION = "v21";
 export const MAX_MESSAGES = 80;
 export const MAX_CONTENT_LENGTH = 8000;
 export const MAX_TOTAL_LENGTH = 100000;
@@ -8,7 +8,8 @@ export const MAX_TOTAL_LENGTH = 100000;
 /** Explicit English source probes; the UI verification action covers other wording. */
 export function isSourceProbe(question: string) {
   return /\b(citations?|cite|verify|verification|fact[- ]?check|proof|evidence|references?)\b/i.test(question)
-    || /\b(source(?:s)?\s*(?:please|pls|\?|$)|(?:what|which|show|give|identify|name).*\bsources?\b(?!\s+of\b)|what can I read|further reading|reading recommendations|exact passage|certain about|how (?:can|do|did|are) you (?:say|know)|where did you (?:get|find))\b/i.test(question);
+    || /\b(source(?:s)?\s*(?:please|pls|\?|$)|(?:what|which|show|give|identify|name).*\bsources?\b(?!\s+of\b)|exact passage|certain about|how (?:can|do|did|are) you (?:say|know)|where did you (?:get|find))\b/i.test(question)
+    || /\b(search|look up|find online|browse)\b/i.test(question);
 }
 
 /** Reject oversized or malformed conversations instead of silently discarding context. */

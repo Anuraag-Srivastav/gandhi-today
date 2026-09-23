@@ -17,10 +17,10 @@ Set **`GROQ_API_KEY`** in the Vercel project: Settings → Environment Variables
 
 `GROQ_MODEL` is optional; blank values use `openai/gpt-oss-120b`.
 
-## v18 request flow and source checks
+## v21 request flow and source checks
 
 - Ordinary questions make one streaming completion request without tools.
-- Explicit English source/verification/reading probes, or the **Verify sources** button, run Groq's built-in browser_search first. This uses the existing Groq key and may incur additional usage.
+- Explicit English source/verification/online-search probes, or the **Verify sources** button, run Groq's built-in browser_search first. Background reading alone does not trigger search. This uses the existing Groq key and may incur additional usage.
 - Search requires a supported GPT-OSS model. An unsupported configured model produces an explicit error; the app does not silently change models.
 - Only returned tool records enter the Reference input. The research model's generated summary is discarded. No tool record means no claimed successful verification.
 - The final user message contains JSON Question and Reference values. The unused template footer is removed from the system message; user text is never interpolated into system instructions.
@@ -31,13 +31,15 @@ Set **`GROQ_API_KEY`** in the Vercel project: Settings → Environment Variables
 - The response is newline-delimited JSON containing status, metadata, text, done or error events. The UI renders HTTP(S) links and removes interrupted replies from later model history.
 - **Test details** shows prompt version/hash, model, search status, executed-tool count and request ID. Server logs contain this metadata, not question text, source passages or API keys.
 
-The prompt remains v18. Source inspection does not guarantee historical accuracy; verify that cited passages actually support each claim. Search-trigger detection is explicit English matching, not a semantic classifier. Use **Verify sources** for wording it misses. No search is performed automatically for an ordinary current-fact question.
+The prompt is v21. Source inspection does not guarantee historical accuracy; verify that cited passages actually support each claim. Search-trigger detection is explicit English matching, not a semantic classifier. Use **Verify sources** for wording it misses. No search is performed automatically for an ordinary current-fact question.
+
+Search receives a focused evidence-only request containing the current question and target answer, rather than the full conversation. Final generation retains the conversation. Search remains capped at 45 seconds; generation at 40 seconds; one optional length rewrite at 20 seconds, within 105 seconds overall. There are no automatic retries. Run `bun scripts/check-source.ts 'your source question'` with GROQ_API_KEY configured to measure search independently of answer generation. It outputs only elapsed time, tool count, finish reason or safe failure category, never credentials or source text. A timeout without returned tool records does not prove no tools started.
 
 Groq documentation: https://console.groq.com/docs/tool-use/built-in-tools/browser-search
 
 ## Checks before evaluation
 
-Source excerpts retain document URLs when supplied as structured metadata or explicit document headers. Internal excerpt markers are resolved to their own source links before display; missing associations display a source-link limitation, never an unrelated URL. Source-backed final answers are buffered to resolve markers safely across streaming chunks. Ordinary answers still stream. Home order is: Begin with an inquiry, question-entry box, suggested questions; conversation input remains at the bottom.
+Source excerpts retain document URLs when supplied as structured metadata or explicit document headers. Internal excerpt markers are resolved to their own source links before display; missing associations display a source-link limitation, never an unrelated URL. All answers are buffered and checked for length before display, with progress updates while waiting. Home order is: Begin with an inquiry, question-entry box, suggested questions; conversation input remains at the bottom.
 
 Run focused tests with: bun test lib/chat-policy.test.js app/api/chat/route.test.js
 These mock Groq and do not prove live tool availability.
