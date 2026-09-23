@@ -14,7 +14,8 @@ export function answerWithSources(text: string) {
       if (parsed.username || parsed.password) return _match;
       if (!sources.some(source => source.url === url)) sources.push({ url, label: label && !/^source\s*\d*$/i.test(label.trim()) ? plainAnswerText(label) : parsed.hostname });
     } catch { return _match; }
-    return bare ? raw.slice(url.length) : "";
+    // A linked work's title can be part of the sentence; move its link, not its meaning.
+    return bare ? raw.slice(url.length) : label && !/^(?:(?:source|reference|citation)s?\s*\d*|reading|read more|\d+)$/i.test(label.trim()) ? plainAnswerText(label) : "";
   }).replace(/[ \t\u00a0\u202f]+([.,;:!?])/g, "$1").replace(/\(\s*\)|\[\s*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
   return { body, sources };
 }
