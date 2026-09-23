@@ -2,6 +2,7 @@ import Groq from "groq-sdk";
 import { createHash } from "node:crypto";
 import { getPromptRules } from "@/lib/prompt";
 import { REVIEW_INSTRUCTIONS, reviewFormat, reviewIssues } from "@/lib/answer-review";
+import { inspectOriginalSources } from "@/lib/original-sources";
 import { PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
 import { bindEvidenceQuestion, canUseRetainedEvidence, openEvidence, sealEvidence } from "@/lib/evidence";
 import { selectSourceEvidence } from "@/lib/source-excerpts";
@@ -147,17 +148,23 @@ export async function POST(request: Request) {
         emit({ type: "status", text: sourceRequired && reuseEvidence ? "Using the retrieved evidence…" : sourceRequired ? "Checking sources…" : "Preparing an answer…" });
         if (sourceRequired && !reuseEvidence) {
           arm("Source search", 45000);
-          const research = await groq.chat.completions.create(sourceRequest(model, resolvedQuestion, verificationTarget, probe ? "verification" : mode === "reading" ? "reading" : "historical", messages.slice(-5, -1)), { signal: abort.signal });
-          const tools = research.choices[0]?.message.executed_tools || [];
+          const originals = probe && verificationTarget ? await inspectOriginalSources(verificationTarget.answer, abort.signal) : [];
+          const inspected = originals.filter(source => source.status === "inspected");
+          const research = originals.length && inspected.length === originals.length ? null :
+            await groq.chat.completions.create(sourceRequest(model, resolvedQuestion, verificationTarget, probe ? "verification" : mode === "reading" ? "reading" : "historical", messages.slice(-5, -1)), { signal: abort.signal });
+          const tools = research?.choices[0]?.message.executed_tools || [];
           const browserTools = tools.filter((tool) => /browser|search/i.test(tool.type));
           toolsExecuted = browserTools.length;
           // Research-model prose is not promoted to source evidence.
-          const records = browserTools.map((tool) => ({
+          const records: unknown[] = browserTools.map((tool) => ({
             type: tool.type, output: tool.output,
             browser_results: tool.browser_results, search_results: tool.search_results,
           })).filter((tool) => tool.output || tool.browser_results?.length || tool.search_results);
+          records.unshift(...inspected.map(source => ({ type: "original-document", url: source.url, content: source.content })));
           if (records.length) {
-            reference = bindEvidenceQuestion(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)), verificationTarget?.question || question);
+            const selected = JSON.parse(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)));
+            selected.originalSourceChecks = originals.map(({ originalUrl, status }) => ({originalUrl, status}));
+            reference = bindEvidenceQuestion(JSON.stringify(selected), verificationTarget?.question || question);
             searchStatus = "results-returned";
           } else {
             searchStatus = toolsExecuted ? "no-results" : "no-tool-record";
@@ -172,7 +179,7 @@ export async function POST(request: Request) {
         emit({ type: "status", text: "Preparing an answer…" });
         arm("Answer generation", 40000);
         const answerMessages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
-            { role: "developer", content: rules + "\n\n" + turnInstruction(mode) + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Retained evidence may concern an older topic; use only passages relevant to the current question. Its presence does not make ordinary questions source-only tasks. Cite a supporting excerpt's sourceUrl using [Source](URL), without extra brackets or citation symbols. If no sourceUrl exists, use evidenced bibliographic details once, not repeated link-unavailable placeholders. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
+            { role: "developer", content: rules + "\n\n" + turnInstruction(mode) + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Retained evidence may concern an older topic; use only passages relevant to the current question. Its presence does not make ordinary questions source-only tasks. Cite a supporting excerpt's sourceUrl using [Source](URL), without extra brackets or citation symbols. If no sourceUrl exists, use evidenced bibliographic details once, not repeated link-unavailable placeholders. Reference contains server-authenticated browser results or directly fetched original-document passages. originalSourceChecks records direct reinspection, not whether every claim is supported. A selected excerpt may omit other parts of a fetched document. Prior assistant text is not evidence. Claim a source was checked only when its passage was actually returned." },
             ...messages.slice(0, -1),
             { role: "user", content: probe ? JSON.stringify({ Question: question, Reference: reference,
               verificationTarget, resolvedQuestion, task: "Assess the identified claim, preserving its subject and qualifications. Distinguish supported, partly supported, not established by the inspected passages, and contradicted. A source failing to support a claim is not proof the claim is false. Correct an unsupported attribution or claimed verification explicitly without asserting historical nonexistence. Never claim an original citation was inspected merely because its URL appears in history. Give a concise correction, supported basis and any necessary limitation, not a claim-by-claim audit." })
