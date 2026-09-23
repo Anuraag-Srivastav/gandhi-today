@@ -14,7 +14,7 @@ let revisionFinishReason = "stop";
 let selectedTarget;
 let reviewDefects = [];
 const create = mock(async (params, options) => {
-  if (params.response_format?.type === "json_schema") {
+  if (params.response_format?.json_schema?.name === "gandhi_answer_review") {
     return { choices: [{ message: { content: JSON.stringify({issues: reviewDefects}) }, finish_reason: "stop" }] };
   }
   if (params.response_format) {

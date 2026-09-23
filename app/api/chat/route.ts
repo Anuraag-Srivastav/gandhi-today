@@ -202,7 +202,7 @@ export async function POST(request: Request) {
         if (finishReason === "stop" && !["definition", "clarification", "unrelated"].includes(mode)) {
           arm("Answer review", 15000);
           const reviewed = await groq.chat.completions.create({
-            model: answerModel, temperature: 0, max_tokens: 1600, ...reasoning("low"),
+            model: answerModel, temperature: 0, max_tokens: 2200, ...reasoning("medium"),
             stream: false, response_format: reviewFormat,
             messages: [{ role: systemRole ? "system" : "developer", content: REVIEW_INSTRUCTIONS },
               { role: "user", content: JSON.stringify({ question: resolvedQuestion, mode, target: verificationTarget, Evidence: reference, candidate: answer }) }],
