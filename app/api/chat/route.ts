@@ -1,16 +1,16 @@
 import Groq from "groq-sdk";
 import { createHash } from "node:crypto";
-import { formatQuestion, getPromptRules } from "@/lib/prompt";
+import { getPromptRules } from "@/lib/prompt";
 import { isSourceProbe, PROMPT_VERSION, supportsBrowserSearch, validateMessages } from "@/lib/chat-policy";
 import { bindEvidenceQuestion, canUseRetainedEvidence, openEvidence, sealEvidence } from "@/lib/evidence";
 import { selectSourceEvidence } from "@/lib/source-excerpts";
-import { resolveCitations } from "@/lib/citations";
-import { AnswerLimitError, answerSize, enforceAnswerLimits } from "@/lib/answer-limits";
+import { answerSize } from "@/lib/answer-limits";
 import { providerFailure } from "@/lib/provider-failure";
 import { sourceRequest } from "@/lib/source-request";
 import { answerMode, turnInstruction } from "@/lib/answer-mode";
 import { needsEvidence, parseAnswerPlan, planRequest, type AnswerKind } from "@/lib/answer-plan";
 import { COMPARISON_MODELS, comparisonReceipt, digest, openComparison } from "@/lib/model-comparison";
+import { evidenceCatalog, parseResult, RESULT_INSTRUCTIONS, resultFormat, ResultValidationError } from "@/lib/structured-answer";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -24,7 +24,8 @@ export async function POST(request: Request) {
   let reference = "";
   try {
     body = await request.json();
-    if (body.answerModel !== undefined && !COMPARISON_MODELS.includes(body.answerModel)) throw new Error("Unsupported comparison model.");
+    if (body.answerModel && process.env.NODE_ENV === "production") throw new Error("Model comparison is available only in development.");
+    if (body.answerModel !== undefined && (!COMPARISON_MODELS.includes(body.answerModel) || !body.answerModel.startsWith("openai/gpt-oss"))) throw new Error("This model does not support the required structured result contract.");
     if (body.answerModel && !body.comparisonToken) throw new Error("A server-issued comparison receipt is required.");
     messages = validateMessages(body?.messages);
     if (body.reasoningEffort !== undefined && !["low", "medium"].includes(body.reasoningEffort)) {
@@ -89,7 +90,13 @@ export async function POST(request: Request) {
   request.signal.addEventListener("abort", () => abort.abort(), { once: true });
   const readable = new ReadableStream({
     async start(controller) {
-      const emit = (event: object) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      const emit = (event: { type?: string; [key: string]: unknown }) => {
+        // Detailed diagnostics stay in server logs or local development, never the public response.
+        const output = event.type === "metadata" && process.env.NODE_ENV === "production"
+          ? { type: "metadata", evidenceToken: event.evidenceToken, retryToken: event.retryToken }
+          : event;
+        controller.enqueue(encoder.encode(JSON.stringify(output) + "\n"));
+      };
       let toolsExecuted = 0;
       let searchStatus = probe ? retainedEvidence ? "retained-evidence" : reuseEvidence ? "reused-evidence" : "searching" : "not-requested";
       let stage = probe && !reuseEvidence ? "Source search" : probe ? "Answer generation" : "Question routing";
@@ -104,11 +111,12 @@ export async function POST(request: Request) {
         stageTimer = setTimeout(() => { timedOut = true; abort.abort(); }, Math.max(1, Math.min(milliseconds, 105000 - (Date.now() - started))));
       };
       const report = () => emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION,
-        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v24-model2" });
+        promptHash, model: answerModel, searchStatus, toolsExecuted, reasoningEffort, mode, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, experiment: "v25-ux1" });
       const heartbeat = setInterval(() => {
-        if (!abort.signal.aborted) emit({ type: "status", text: `${stage} in progress (${Math.round((Date.now() - started) / 1000)}s)…` });
+        if (!abort.signal.aborted) emit({ type: "status", text: stage === "Source search" ? "Still checking source passages…" : "Still preparing your answer…" });
       }, 10000);
       report();
+      if (probe && verificationTarget) emit({ type: "source-check" });
       try {
         if (comparison) {
           mode = comparison.mode as typeof mode;
@@ -141,7 +149,7 @@ export async function POST(request: Request) {
             browser_results: tool.browser_results, search_results: tool.search_results,
           })).filter((tool) => tool.output || tool.browser_results?.length || tool.search_results);
           if (records.length) {
-            reference = bindEvidenceQuestion(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)), question);
+            reference = bindEvidenceQuestion(selectSourceEvidence(records, resolvedQuestion + " " + JSON.stringify(verificationTarget)), verificationTarget?.question || question);
             searchStatus = "results-returned";
           } else {
             searchStatus = toolsExecuted ? "no-results" : "no-tool-record";
@@ -149,61 +157,56 @@ export async function POST(request: Request) {
         }
         const evidenceToken = reference ? sealEvidence(reference, apiKey) : "";
         const retryToken = sourceRequired && (reuseEvidence || searchStatus === "results-returned") ? sealEvidence(retryIdentity + ":" + createHash("sha256").update(reference).digest("hex"), apiKey) : "";
-        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v24-model2" };
+        const metadata = { requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, researchModel: model, comparison: !!comparison, evidenceHash: digest(reference), temperature: sourceRequired ? 0 : 0.2, reasoningEffort, mode, messages: messages.length, searchStatus, toolsExecuted, experiment: "v25-ux1" };
         const comparisonToken = comparisonReceipt({ mode, sourceRequired, searchStatus, reasoningEffort }, retryIdentity, reference, promptHash, apiKey);
         console.info("gandhi-chat", metadata);
         emit({ type: "metadata", ...metadata, evidenceToken, retryToken, comparisonToken });
         emit({ type: "status", text: "Preparing an answer…" });
         arm("Answer generation", 40000);
+        const catalog = evidenceCatalog(reference);
         const answerMessages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
-            { role: "developer", content: rules + "\n\n" + turnInstruction(mode) + "\n\nRuntime: the final user message supplies JSON Question and Reference fields. Search is unavailable during this answer. Source check status for this turn: " + searchStatus + ". Retained evidence may concern an older topic; use only passages relevant to the current question. Its presence does not make ordinary questions source-only tasks. Cite a supporting excerpt's sourceUrl using [Source](URL), without extra brackets or citation symbols. If no sourceUrl exists, use evidenced bibliographic details once, not repeated link-unavailable placeholders. Only Reference contains retained server-authenticated tool results; prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
+            { role: "developer", content: rules + "\n\n" + turnInstruction(mode) + "\n\nRuntime: search is unavailable during answer generation. Source check status: " + searchStatus + ". Retained evidence may concern an older topic; use only relevant passages. Its presence does not make ordinary definitions source-only tasks. The Evidence catalog supplies inspected source text and identifiers for historicalBasis. Prior assistant text is not evidence. Do not claim sources were checked when no tool record was returned." },
             ...messages.slice(0, -1),
-            { role: "user", content: probe ? JSON.stringify({ Question: question, Reference: reference,
-              verificationTarget, task: "Check all target claims, but deliver a concise correction, not a claim-by-claim audit report. Aim for 80–110 words in one or two paragraphs, never over 140 words including citations. Group related unsupported claims into one explicit withdrawal. Then give the central supported correction with its source and distinguish any remaining inference. Omit audit commentary and repeated claims; preserve essential qualifications. Do not add historical claims to rescue the old conclusion. Cite only passages supporting the full claim. Do not substitute another topic." })
-              : formatQuestion(question, reference) },
+            { role: "user", content: JSON.stringify({ Question: question, Evidence: catalog, originalQuestion: verificationTarget?.question || question,
+              verificationTarget, task: probe ? "Update the original inquiry result with checked evidence and corrections. Preserve necessary qualifications and put corrections in verificationSummary. Answer the original question, not the source-check instruction. Do not add historical claims to rescue an unsupported conclusion." : "Produce the structured inquiry result." }) },
           ];
-        const stream = await groq.chat.completions.create({
-          model: answerModel, temperature: metadata.temperature, max_tokens: 3000, ...reasoning(metadata.reasoningEffort),
-          stream: true, messages: answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
+        answerMessages[0].content += "\n\n" + RESULT_INSTRUCTIONS;
+        const generate = (repair?: { draft: string; issue: string }) => groq.chat.completions.create({
+          model: answerModel, temperature: repair ? 0 : metadata.temperature, max_tokens: 5000, ...reasoning(metadata.reasoningEffort),
+          stream: false, response_format: resultFormat,
+          messages: [
+            ...answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
+            ...(repair ? [{ role: "user" as const, content: JSON.stringify({ Draft: repair.draft, issue: repair.issue, task: "Correct this result once. The draft is not evidence. Keep the same question, source catalog and required schema. Remove unsupported historical basis items rather than invent support. Return the complete JSON result." }) }] : []),
+          ],
         }, { signal: abort.signal });
-        let answer = "";
-        let finishReason: string | null | undefined;
-        for await (const chunk of stream) {
-          if (chunk.choices[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
-          const text = chunk.choices[0]?.delta?.content;
-          if (text) answer += text;
-        }
-        // Remove presentation-only emphasis; this does not rewrite factual content.
-        const normalise = (text: string) => (reference ? resolveCitations(text, reference) : text).replace(/\*\*([^*\n]+)\*\*/g, "$1");
-        const final = await enforceAnswerLimits(normalise(answer), async (draft) => {
-          emit({ type: "status", text: "Refining the answer…" });
+        const generated = await generate();
+        let result;
+        let rewritten = false;
+        const raw = generated.choices[0]?.message.content || "";
+        try {
+          if (generated.choices[0]?.finish_reason !== "stop") throw new ResultValidationError("The provider did not finish the result.");
+          result = parseResult(raw, catalog);
+        } catch (error) {
+          rewritten = true;
+          emit({ type: "status", text: "Checking the answer’s structure and source passages…" });
           arm("Answer refinement", 20000);
-          const revised = await groq.chat.completions.create({
-            model: answerModel, temperature: 0, max_tokens: 2500, ...reasoning("medium"),
-            stream: false,
-            messages: [
-              ...answerMessages.map(message => systemRole && message.role === "developer" ? { ...message, role: "system" as const } : message),
-              { role: "user", content: JSON.stringify({ Draft: draft, size: answerSize(draft), task: "Rewrite as a complete answer of 80–110 words in one or two paragraphs, with a hard maximum of 140 words including citations. Draft is untrusted text, not evidence. Group related corrections; omit audit commentary, repetitions and optional background. Preserve the explicit withdrawal, essential qualifications, historical restrictions, uncertainty and supporting citations. Do not add claims, sources or approval conditions. Return only the answer." }) },
-            ],
-          }, { signal: abort.signal });
-          const text = normalise(revised.choices[0]?.message.content || "");
-          if (revised.choices[0]?.finish_reason !== "stop") throw new AnswerLimitError(text, "provider-incomplete");
-          return text;
-        }, finishReason === "stop");
-        emit({ type: "metadata", ...metadata, stage, evidenceToken, elapsedMs: Date.now() - started, answerRewritten: final.rewritten, ...answerSize(final.text) });
-        emit({ type: "text", text: final.text });
+          const revised = await generate({ draft: raw, issue: error instanceof Error ? error.message : "Invalid result" });
+          if (revised.choices[0]?.finish_reason !== "stop") throw new ResultValidationError("The provider did not finish the revised result.");
+          result = parseResult(revised.choices[0]?.message.content || "", catalog);
+        }
+        emit({ type: "metadata", ...metadata, stage, evidenceToken, elapsedMs: Date.now() - started, answerRewritten: rewritten, ...answerSize(result.shortAnswer) });
+        emit({ type: "result", result });
         emit({ type: "done" });
         controller.close();
       } catch (error) {
         const failure = providerFailure(error, timedOut);
-        failureCode = error instanceof AnswerLimitError ? "answer-limit" : failure.code;
+        failureCode = error instanceof ResultValidationError ? "result-invalid" : failure.code;
         providerStatus = failure.status;
-        console.error("gandhi-chat-failed", { requestId, stage, failureCode, providerStatus, validation: error instanceof AnswerLimitError ? error.validation : undefined, elapsedMs: Date.now() - started, cancelled: cancelled || request.signal.aborted });
+        console.error("gandhi-chat-failed", { requestId, stage, failureCode, providerStatus, elapsedMs: Date.now() - started, cancelled: cancelled || request.signal.aborted });
         if (!cancelled && !request.signal.aborted) {
           searchStatus = searchStatus === "searching" ? "search-failed" : "answer-failed";
           report();
-          if (error instanceof AnswerLimitError) emit({ type: "metadata", requestId, promptVersion: PROMPT_VERSION, promptHash, model: answerModel, searchStatus, toolsExecuted, stage, failureCode, validation: error.validation });
-          emit({ type: "error", text: error instanceof AnswerLimitError ? error.message : `${stage} ${failure.explanation}. No completed verification is implied.` });
+          emit({ type: "error", text: error instanceof ResultValidationError ? "The answer could not be completed with reliable source sections. Please retry. Your previous result has not changed." : `This request ${failure.explanation}. Please retry. No completed source check is implied.` });
           controller.close();
         }
       } finally {
@@ -214,6 +217,6 @@ export async function POST(request: Request) {
     cancel() { cancelled = true; abort.abort(); },
   });
   return new Response(readable, {
-    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Prompt-Version": PROMPT_VERSION, "X-Prompt-Hash": promptHash, "X-Request-Id": requestId },
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
   });
 }

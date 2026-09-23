@@ -30,13 +30,15 @@ for (const n of selected) {
         if (typeof token === "string") evidenceToken = token;
         metadata = { ...metadata, ...safe };
       }
-      const answer = events.filter(e => e.type === "text").map(e => e.text).join("");
+      const result = events.find(e => e.type === "result")?.result;
+      const answer = result?.shortAnswer || "";
       const failure = events.find(e => e.type === "error")?.text;
       const completed = events.some(e => e.type === "done") && !!answer;
-      console.log(JSON.stringify({ sequence: n, question, answer, completed, failure, elapsedMs: Date.now() - started, metadata,
+      console.log(JSON.stringify({ sequence: n, question, answer, result, completed, failure, elapsedMs: Date.now() - started, metadata,
         size: answerSize(answer), malformedCitation: /【|\[Source\s*\[/.test(answer), semanticScore: "manual-review-required" }));
       if (!completed) break;
-      messages.push({ role: "assistant", content: answer });
+      if (events.some(e => e.type === "source-check")) messages.splice(-2, 2);
+      messages.push({ role: "assistant", content: JSON.stringify(result) });
     } catch (error) {
       console.log(JSON.stringify({ sequence: n, question, completed: false, failure: error instanceof Error ? error.message : "Unknown failure", elapsedMs: Date.now() - started }));
       break;

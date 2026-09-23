@@ -1,14 +1,14 @@
 /** Paired answer-model trial: identical conversation, routing, prompt and signed evidence.
  * Candidate answers advance history for both arms; neither arm sees the other's current answer.
- * bun scripts/compare-models.ts https://www.gandhisays.com 1,2
+ * Development only: bun scripts/compare-models.ts http://localhost:3107 1,2
  * Inputs only: no reference answers or topic-specific production instructions.
  */
 import { sequences } from "./evaluation-cases";
 import { COMPARISON_MODELS } from "../lib/model-comparison";
-const candidateModel = process.argv[4] || "qwen/qwen3.8-27b";
-if (!COMPARISON_MODELS.includes(candidateModel)) throw new Error("Unsupported candidate");
+const candidateModel = process.argv[4] || "openai/gpt-oss-20b";
+if (!COMPARISON_MODELS.includes(candidateModel) || !candidateModel.startsWith("openai/gpt-oss")) throw new Error("Candidate must support strict structured output");
 const base = process.argv[2];
-if (!base || !/^https:\/\//.test(base)) throw new Error("Supply HTTPS app URL.");
+if (!base || !["localhost", "127.0.0.1"].includes(new URL(base).hostname)) throw new Error("Model comparison is development-only. Supply a local app URL.");
 const selected = process.argv[3]?.split(",").map(Number) || sequences.map((_, i) => i + 1);
 if (selected.some(n => !Number.isInteger(n) || n < 1 || n > sequences.length)) throw new Error("Invalid sequence");
 async function ask(body: object) {
@@ -18,7 +18,8 @@ async function ask(body: object) {
   const metadata = Object.assign({}, ...events.filter(e => e.type === "metadata"));
   const { evidenceToken, comparisonToken, retryToken, ...safe } = metadata;
   void retryToken;
-  return { evidenceToken, comparisonToken, result: { answer: events.filter(e => e.type === "text").map(e => e.text).join(""), completed: events.some(e => e.type === "done"), failure: events.find(e => e.type === "error")?.text, metadata: safe } };
+  const answer = events.find(e => e.type === "result")?.result;
+  return { evidenceToken, comparisonToken, result: { answer, completed: !!answer && events.some(e => e.type === "done"), failure: events.find(e => e.type === "error")?.text, metadata: safe } };
 }
 for (const sequence of selected) {
   const messages: { role: string; content: string }[] = [];
@@ -36,7 +37,7 @@ for (const sequence of selected) {
       const paired = baseline.result.metadata.evidenceHash === candidate.result.metadata.evidenceHash && baseline.result.metadata.promptHash === candidate.result.metadata.promptHash;
       console.log(JSON.stringify({ sequence, question, paired, baseline: baseline.result, candidate: candidate.result }));
       if (!candidate.result.completed) break;
-      messages.push({ role: "assistant", content: candidate.result.answer });
+      messages.push({ role: "assistant", content: JSON.stringify(candidate.result.answer) });
     } catch (error) { console.log(JSON.stringify({ sequence, question, paired: false, failure: String(error) })); break; }
     await new Promise(resolve => setTimeout(resolve, 1500));
   }
