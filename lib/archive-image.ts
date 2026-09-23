@@ -1,7 +1,7 @@
-/** Server-side rights configuration. No image is enabled by default. */
+/** Server-side archive configuration; publication approved by the site owner. */
 export const ARCHIVE_IMAGE = {
-  enabled: process.env.ARCHIVE_IMAGE_ENABLED === "true",
-  credit: (process.env.ARCHIVE_IMAGE_CREDIT ?? "").trim(),
+  enabled: (process.env.ARCHIVE_IMAGE_ENABLED ?? "true") === "true",
+  credit: (process.env.ARCHIVE_IMAGE_CREDIT ?? "Image supplied by the site owner").trim(),
   licence: (process.env.ARCHIVE_IMAGE_LICENCE ?? "").trim(),
 };
 

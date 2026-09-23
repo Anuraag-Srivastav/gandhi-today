@@ -2,13 +2,16 @@
 
 `ARCHIVE_IMAGE` is server-only configuration in `lib/archive-image.ts`:
 
-- `enabled`: false unless `ARCHIVE_IMAGE_ENABLED=true`.
-- `credit`: empty unless `ARCHIVE_IMAGE_CREDIT` is supplied; whitespace is trimmed.
+- `enabled`: true by default following the site owner's publication instruction;
+  set `ARCHIVE_IMAGE_ENABLED=false` to disable.
+- `credit`: "Image supplied by the site owner" by default; override with
+  `ARCHIVE_IMAGE_CREDIT` (whitespace is trimmed).
 - `licence`: empty unless `ARCHIVE_IMAGE_LICENCE` is supplied.
 
 An enabled image without credit fails config loading and therefore the build.
-No rights attribution is invented. Set the real credit only after checking rights,
-then rebuild. Disabled pages contain neither derived image URL in HTML or CSS.
+The credit identifies who supplied the image, not a photographer or rights holder.
+No public-domain licence claim is added. Disabled pages contain neither derived
+image URL in HTML or CSS.
 The WebP assets remain directly accessible static files; the gate controls rendering.
 
 Keep the source at `assets/archive/source/gandhi-note-1920.jpg`, outside `public`.
