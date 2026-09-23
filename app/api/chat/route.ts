@@ -199,7 +199,9 @@ export async function POST(request: Request) {
         // Remove presentation-only emphasis; this does not rewrite factual content.
         const normalise = (text: string) => (reference ? resolveCitations(text, reference) : text).replace(/\*\*([^*\n]+)\*\*/g, "$1");
         let issues: string[] = [];
-        if (finishReason === "stop" && !["definition", "clarification", "unrelated"].includes(mode)) {
+        // Entailment review needs passages. Empty-evidence review added latency and
+        // encouraged unsupported absence claims in live tests.
+        if (reference && finishReason === "stop" && !["definition", "clarification", "unrelated"].includes(mode)) {
           arm("Answer review", 15000);
           const reviewed = await groq.chat.completions.create({
             model: answerModel, temperature: 0, max_tokens: 2200, ...reasoning("medium"),

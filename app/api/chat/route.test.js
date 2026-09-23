@@ -410,9 +410,10 @@ test("unidentified quotation and definitions bypass retrieval even during source
 });
 
 test("semantic defects trigger the existing single repair budget", async () => {
+  planKind = "historical";
   reviewDefects = ["The factual attribution exceeds the supplied passage."];
-  const events = await ask("A modern dilemma");
-  expect(calls).toHaveLength(2);
-  expect(JSON.parse(calls[1].messages.at(-1).content).issues).toEqual(reviewDefects);
+  const events = await ask("A historical question");
+  expect(calls).toHaveLength(3);
+  expect(JSON.parse(calls[2].messages.at(-1).content).issues).toEqual(reviewDefects);
   expect(events.find(e => e.type === "text").text).toBe(revision);
 });
