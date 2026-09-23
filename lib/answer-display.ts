@@ -16,6 +16,9 @@ export function answerWithSources(text: string) {
     } catch { return _match; }
     // A linked work's title can be part of the sentence; move its link, not its meaning.
     return bare ? raw.slice(url.length) : label && !/^(?:(?:source|reference|citation)s?\s*\d*|reading|read more|\d+)$/i.test(label.trim()) ? plainAnswerText(label) : "";
-  }).replace(/[ \t\u00a0\u202f]+([.,;:!?])/g, "$1").replace(/\(\s*\)|\[\s*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
+  }).replace(/【\s*Source\s*】|\[\s*Source\s*\](?!\()/gi, "")
+    .replace(/[ \t\u00a0\u202f]+([.,;:!?])/g, "$1")
+    .replace(/(^|\s)[.,;](?=\s|$)/g, "$1")
+    .replace(/\(\s*\)|\[\s*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
   return { body, sources };
 }

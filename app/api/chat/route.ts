@@ -197,7 +197,7 @@ export async function POST(request: Request) {
           if (text) answer += text;
         }
         // Remove presentation-only emphasis; this does not rewrite factual content.
-        const normalise = (text: string) => (reference ? resolveCitations(text, reference) : text).replace(/\*\*([^*\n]+)\*\*/g, "$1");
+        const normalise = (text: string) => resolveCitations(text, reference).replace(/\*\*([^*\n]+)\*\*/g, "$1");
         let issues: string[] = [];
         // Entailment review needs passages. Empty-evidence review added latency and
         // encouraged unsupported absence claims in live tests.
