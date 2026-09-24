@@ -1,10 +1,10 @@
 import { ImageResponse } from "next/og";
-import { SocialPreview } from "@/lib/social-preview";
+import { SocialIconPreview } from "@/lib/social-preview";
 
-export const alt = "Gandhi Says — historical sources and careful interpretation for present-day questions";
-export const size = { width: 1200, height: 630 };
+export const alt = "Gandhi Says charkha symbol";
+export const size = { width: 512, height: 512 };
 export const contentType = "image/png";
 
 export default function OpenGraphImage() {
-  return new ImageResponse(<SocialPreview />, size);
+  return new ImageResponse(<SocialIconPreview />, size);
 }

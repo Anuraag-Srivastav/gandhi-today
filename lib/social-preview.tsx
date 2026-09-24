@@ -41,3 +41,21 @@ export function SocialPreview() {
     </div>
   );
 }
+
+/** Compact Open Graph mark for apps that render link previews as square thumbnails. */
+export function SocialIconPreview() {
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#f3ead8", position: "relative" }}>
+      <div style={{ position: "absolute", inset: "0 66.66% auto 0", height: 10, background: "#c45c26" }} />
+      <div style={{ position: "absolute", inset: "0 33.33% auto 33.33%", height: 10, background: "#fbf6ea" }} />
+      <div style={{ position: "absolute", inset: "0 0 auto 66.66%", height: 10, background: "#3f5c48" }} />
+      <div style={{ width: 360, height: 360, display: "flex", alignItems: "center", justifyContent: "center", border: "5px solid #d9ba7a", borderRadius: 180, background: "#fbf6ea" }}>
+        <svg width="260" height="260" viewBox="0 0 64 64">
+          <circle cx="32" cy="32" r="22" fill="none" stroke="#c45c26" strokeWidth="2" />
+          <circle cx="32" cy="32" r="3.2" fill="#2a2418" />
+          <path d="M32 10v44M10 32h44M16.4 16.4l31.2 31.2M47.6 16.4 16.4 47.6" stroke="#3f5c48" strokeWidth="1.5" />
+        </svg>
+      </div>
+    </div>
+  );
+}
