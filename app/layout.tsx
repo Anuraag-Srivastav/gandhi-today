@@ -22,11 +22,21 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.gandhisays.com"),
   title: "What would Gandhi say today?",
   description:
     "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",
-  openGraph: { description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources." },
-  twitter: { description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources." },
+  openGraph: {
+    title: "What would Gandhi say today?",
+    description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",
+    type: "website",
+    siteName: "Gandhi Says",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "What would Gandhi say today?",
+    description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
