@@ -22,3 +22,9 @@ test("requested draft topics remain inaccessible through the public lookup", () 
   ]);
   for (const draft of drafts) expect(getPublishedAnswer(draft.slug)).toBeUndefined();
 });
+
+test("published summaries preserve the evidenced sequence and source captions do not repeat their label", () => {
+  const khadi = getPublishedAnswer("why-gandhi-spun-his-own-cloth");
+  expect(khadi.summary.indexOf("hand-woven cloth")).toBeLessThan(khadi.summary.indexOf("then pursued spinning"));
+  for (const source of khadi.sources) expect(source.claimSupported).not.toMatch(/^supports\b/i);
+});

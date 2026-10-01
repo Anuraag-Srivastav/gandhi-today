@@ -33,9 +33,9 @@ export const answerRecords: readonly AnswerRecord[] = [
     title: "Why did Gandhi spin his own cloth?",
     slug: "why-gandhi-spun-his-own-cloth",
     summary:
-      "Gandhi treated hand-spinning as a practical way to reduce dependence on mills, learn about weavers’ conditions, and connect swaraj with everyday economic life.",
+      "Adopting hand-woven cloth brought Gandhi and the Sabarmati Ashram into contact with weavers’ hardships. He then pursued spinning to reduce their remaining dependence on mills.",
     shortAnswer:
-      "Gandhi turned to hand-spinning because buying mill yarn still left the ashram dependent on industrial producers. Spinning was meant to make self-reliance practical, bring people closer to the conditions faced by weavers, and connect everyday work with swaraj, or self-rule.",
+      "Gandhi and other members of the Sabarmati Ashram first adopted hand-woven cloth made from Indian yarn. That experience revealed the hardships facing weavers. Because the yarn still came from mills, they then pursued hand-spinning to reduce that dependence and make self-reliance more practical.",
     sections: [
       {
         kind: "historical",
@@ -63,7 +63,7 @@ export const answerRecords: readonly AnswerRecord[] = [
         locator: "Part V, Chapter XL, “The Birth of Khadi”",
         url: "https://www.mkgandhi.in/autobio/chap163.htm",
         claimSupported:
-          "Supports the account of the ashram’s hand-woven-cloth pledge, its contact with weavers, its continued dependence on mills, and the decision to spin yarn.",
+          "The ashram’s hand-woven-cloth pledge, what members learned about weavers, their continued dependence on mills, and the decision to spin yarn.",
       },
     ],
     status: "published",
