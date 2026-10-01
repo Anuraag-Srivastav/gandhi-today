@@ -21,8 +21,8 @@ export async function generateMetadata({ params }: AnswerPageProps): Promise<Met
     title: `${answer.title} | Gandhi Says`,
     description: answer.summary,
     alternates: { canonical: url },
-    openGraph: { title: answer.title, description: answer.summary, url, type: "article", publishedTime: answer.publishedAt },
-    twitter: { card: "summary_large_image", title: answer.title, description: answer.summary },
+    openGraph: { title: answer.title, description: answer.summary, url, type: "article", publishedTime: answer.publishedAt, images: ["/opengraph-image"] },
+    twitter: { card: "summary_large_image", title: answer.title, description: answer.summary, images: ["/twitter-image"] },
   };
 }
 

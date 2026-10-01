@@ -9,8 +9,8 @@ export const metadata: Metadata = {
   title: "Reviewed answers about Gandhi | Gandhi Says",
   description,
   alternates: { canonical: "/answers" },
-  openGraph: { title: "Reviewed answers about Gandhi", description, url: "/answers", type: "website" },
-  twitter: { card: "summary_large_image", title: "Reviewed answers about Gandhi", description },
+  openGraph: { title: "Reviewed answers about Gandhi", description, url: "/answers", type: "website", images: ["/opengraph-image"] },
+  twitter: { card: "summary_large_image", title: "Reviewed answers about Gandhi", description, images: ["/twitter-image"] },
 };
 
 export default function AnswersPage() {
