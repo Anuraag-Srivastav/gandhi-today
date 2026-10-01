@@ -22,7 +22,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.gandhisays.com"),
+  metadataBase: new URL("https://www.gandhisays.in"),
   title: "What would Gandhi say today?",
   description:
     "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",

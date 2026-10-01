@@ -35,7 +35,7 @@ export function SocialPreview() {
         Historical sources. Careful interpretation for present-day questions.
       </div>
       <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 22, color: "#8c6e4a" }}>
-        <span>gandhisays.com</span>
+        <span>gandhisays.in</span>
         <span>His record, and what it might mean now</span>
       </div>
     </div>

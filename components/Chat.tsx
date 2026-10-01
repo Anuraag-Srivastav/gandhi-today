@@ -83,7 +83,7 @@ function Charkha({ className = "", spinning = false }: { className?: string; spi
   );
 }
 
-export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
+export function Chat({ archiveTexture, featuredAnswers = [] }: { archiveTexture?: ReactNode; featuredAnswers?: { title: string; slug: string; summary: string }[] }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -343,6 +343,7 @@ export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
         <div className="flex shrink-0 flex-col items-end gap-1">
         <div className="flex items-center">
         <Link href="/quiz" className="font-ui inline-flex min-h-11 items-center px-2 text-xs text-ink-soft underline underline-offset-4 hover:text-saffron-deep">Quiz</Link>
+        <Link href="/answers" className="font-ui inline-flex min-h-11 items-center px-2 text-xs text-ink-soft underline underline-offset-4 hover:text-saffron-deep">Answers</Link>
         <Link href="/about" className="font-ui inline-flex min-h-11 items-center px-2 text-xs text-ink-soft underline underline-offset-4 hover:text-saffron-deep">About</Link>
         </div>
         {hasConversation ? (
@@ -399,6 +400,16 @@ export function Chat({ archiveTexture }: { archiveTexture?: ReactNode }) {
                       </button>
                     ))}
                   </div>
+                  {featuredAnswers.length > 0 && <section className="mt-5 border-t border-earth/10 pt-4" aria-labelledby="reviewed-answers-heading">
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 id="reviewed-answers-heading" className="font-ui text-xs text-ink-soft">Reviewed answer</h2>
+                      <Link href="/answers" className="font-ui inline-flex min-h-11 items-center text-xs text-earth underline underline-offset-4">View all →</Link>
+                    </div>
+                    {featuredAnswers.slice(0, 1).map((answer) => <Link key={answer.slug} href={`/answers/${answer.slug}`} className="group block rounded-xl border border-earth/10 bg-khadi/30 px-4 py-3 hover:border-saffron/25">
+                      <span className="font-display block text-lg font-semibold text-ink group-hover:text-saffron-deep">{answer.title}</span>
+                      <span className="mt-1 block text-xs leading-5 text-ink-soft">{answer.summary}</span>
+                    </Link>)}
+                  </section>}
                 </div>
               </div>
             ) : (
