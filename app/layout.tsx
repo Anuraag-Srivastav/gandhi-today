@@ -26,6 +26,12 @@ export const metadata: Metadata = {
   title: "What would Gandhi say today?",
   description:
     "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",
+  verification: {
+    google: "GuBWUY1VWyIuA_2EVOrbmTSiu7ryNDht_B0maQFSOk4",
+    other: {
+      "msvalidate.01": "9326CE7B49E19EB2D87A83E4277D665F",
+    },
+  },
   openGraph: {
     title: "What would Gandhi say today?",
     description: "What Gandhi actually wrote, where he's been criticised, and how his principles might apply today, with sources.",
